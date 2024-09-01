@@ -1,22 +1,22 @@
 {
-  "name": "@george.talusan/homebridge-plugin-eufy-robovac",
+  "name": "@george.talusan/homebridge-eufy-robovac",
   "displayName": "Homebridge Plugin for Eufy Robovac",
   "type": "module",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Homebridge Plugin for Eufy Robovac",
   "author": "George Talusan <george.talusan@gmail.com>",
   "license": "ISC",
-  "homepage": "https://github.com/gtalusan/homebridge-plugin-eufy-robovac#readme",
+  "homepage": "https://github.com/gtalusan/homebridge-eufy-robovac#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gtalusan/homebridge-plugin-eufy-robovac.git"
+    "url": "https://github.com/gtalusan/homebridge-eufy-robovac.git"
   },
   "bugs": {
-    "url": "https://github.com/gtalusan/homebridge-plugin-eufy-robovac/issues"
+    "url": "https://github.com/gtalusan/homebridge-eufy-robovac/issues"
   },
   "keywords": [
     "homebridge-plugin",
-    "homebridge-plugin-eufy-robovac",
+    "homebridge-eufy-robovac",
     "eufy",
     "robovac",
     "smartvac"
