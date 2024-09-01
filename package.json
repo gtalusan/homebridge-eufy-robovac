@@ -1,5 +1,5 @@
 {
-  "name": "homebridge-plugin-eufy-robovac",
+  "name": "@george.talusan/homebridge-plugin-eufy-robovac",
   "displayName": "Homebridge Plugin for Eufy Robovac",
   "type": "module",
   "version": "0.0.1",
