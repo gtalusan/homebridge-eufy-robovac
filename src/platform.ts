@@ -71,10 +71,10 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
     const accessories = [
       {
         displayName: () => {
-          return `${this.config.name} Clean`;
+          return `${this.config.name}`;
         },
         uuid: () => {
-          return this.api.hap.uuid.generate(`${this.config.name}-${this.config.ip}-Clean`);
+          return this.api.hap.uuid.generate(`${this.config.name}-${this.config.ip}`);
         },
         make: (accessory: PlatformAccessory) => {
           new DefaultPlatformAccessory(this, accessory);
