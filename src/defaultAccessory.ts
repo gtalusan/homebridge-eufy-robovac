@@ -7,6 +7,8 @@ interface RobovacEvent {
   value: boolean | number | string | object | null;
 };
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
 export class DefaultPlatformAccessory {
   private service: Service;
 
@@ -83,7 +85,9 @@ export class DefaultPlatformAccessory {
       if (on) {
         await this.platform.robovac.clean();
       } else {
-        await this.platform.robovac.goHome();
+        await this.platform.robovac.pause();
+        await sleep(3000);
+        await this.platform.robovac.goHome(true);
       }
     } catch (error: unknown) {
       this.platform.log.error(error as string);
