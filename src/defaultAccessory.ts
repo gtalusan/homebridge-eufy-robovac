@@ -99,6 +99,9 @@ export class DefaultPlatformAccessory {
       return false;
     }
     try {
+      if (this.platform.robovac.goingHome()) {
+        return false;
+      }
       return !this.platform.robovac.docked();
     } catch (error: unknown) {
       this.platform.log.error(error as string);
