@@ -8,19 +8,14 @@ const require = createRequire(import.meta.url);
 
 const { RoboVac } = require('@george.talusan/eufy-robovac-js');
 
-/**
- * HomebridgePlatform
- * This class is the main constructor for your plugin, this is where you should
- * parse the user config and discover/register accessories with Homebridge.
- */
 export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service;
   public readonly Characteristic: typeof Characteristic;
 
-  // this is used to track restored cached accessories
   public readonly accessories: PlatformAccessory[] = [];
 
   public robovac: typeof RoboVac;
+  public connected: boolean = false;
 
   constructor(
     public readonly log: Logging,
@@ -42,17 +37,20 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
       try {
         this.robovac = new RoboVac({ ip: config.ip, deviceId: config.deviceId, localKey: config.deviceKey });
         this.robovac.on('tuya.disconnected', async () => {
+          this.connected = false;
           const id = setInterval(async () => {
             try {
               this.log.debug('reconnecting...');
               await this.robovac.connect();
               clearInterval(id);
+              this.connected = true;
             } catch (error: unknown) {
               this.log.error(error as string);
             }
           }, 2000);
         });
         await this.robovac.initialize();
+        this.connected = true;
       } catch (error: unknown) {
         this.log.error(error as string);
       }

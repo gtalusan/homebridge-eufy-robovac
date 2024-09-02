@@ -31,6 +31,9 @@ export class DefaultPlatformAccessory {
       this.accessory.addService(this.platform.Service.Battery, `${displayName} Battery Level`);
 
     const updateBatteryLevel = () => {
+      if (!this.connected()) {
+        return;
+      }
       try {
         batteryLevelService.updateCharacteristic(this.platform.Characteristic.BatteryLevel, this.platform.robovac.batteryLevel());
       } catch (error: unknown) {
@@ -45,8 +48,7 @@ export class DefaultPlatformAccessory {
     findMyRobot.getCharacteristic(this.platform.Characteristic.On)
       .onSet(async (value: CharacteristicValue) => {
         try {
-          if (this.platform.robovac.docked()) {
-            this.platform.log.warn(`${displayName} is docked`);
+          if (!this.connected()) {
             return;
           }
           const on: boolean = value as boolean;
@@ -65,7 +67,17 @@ export class DefaultPlatformAccessory {
     });
   }
 
+  connected(): boolean {
+    if (!this.platform.connected) {
+      this.platform.log.warn('not connected');
+    }
+    return this.platform.connected;
+  }
+
   async setOn(value: CharacteristicValue) {
+    if (!this.connected()) {
+      return;
+    }
     try {
       const on: boolean = value as boolean;
       if (on) {
@@ -79,6 +91,9 @@ export class DefaultPlatformAccessory {
   }
 
   async getOn(): Promise<CharacteristicValue> {
+    if (!this.connected()) {
+      return false;
+    }
     try {
       return !this.platform.robovac.docked();
     } catch (error: unknown) {
