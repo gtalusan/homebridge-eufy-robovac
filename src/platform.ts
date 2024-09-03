@@ -36,21 +36,23 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
 
       try {
         this.robovac = new RoboVac({ ip: config.ip, deviceId: config.deviceId, localKey: config.deviceKey });
-        this.robovac.on('tuya.disconnected', async () => {
+        this.robovac.on('tuya.connected', () => {
+          this.connected = true;
+          this.log.info('Connected');
+        });
+        this.robovac.on('tuya.disconnected', () => {
+          this.log.info('Disconnected. Attempting reconnect...');
           this.connected = false;
           const id = setInterval(async () => {
             try {
-              this.log.debug('reconnecting...');
               await this.robovac.connect();
               clearInterval(id);
-              this.connected = true;
             } catch (error: unknown) {
               this.log.error(error as string);
             }
           }, 2000);
         });
         await this.robovac.initialize();
-        this.connected = true;
       } catch (error: unknown) {
         this.log.error(error as string);
       }

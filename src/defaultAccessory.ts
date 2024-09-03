@@ -10,8 +10,6 @@ interface RobovacEvent {
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 export class DefaultPlatformAccessory {
-  private service: Service;
-
   constructor(
     private readonly platform: EufyRobovacHomebridgePlatform,
     private readonly accessory: PlatformAccessory,
@@ -23,13 +21,13 @@ export class DefaultPlatformAccessory {
       .setCharacteristic(this.platform.Characteristic.Model, 'Robovac')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, 'Default-Serial');
 
-    this.service = this.accessory.getService(`${displayName}`) ||
+    const main: Service = this.accessory.getService(`${displayName}`) ||
       this.accessory.addService(this.platform.Service.Switch, `${displayName}`, 'clean');
-    this.service.getCharacteristic(this.platform.Characteristic.On)
+    main.getCharacteristic(this.platform.Characteristic.On)
       .onSet(this.setOn.bind(this))
       .onGet(this.getOn.bind(this));
 
-    const batteryLevelService = this.accessory.getService(`${displayName} Battery Level`) ||
+    const batteryLevelService: Service = this.accessory.getService(`${displayName} Battery Level`) ||
       this.accessory.addService(this.platform.Service.Battery, `${displayName} Battery Level`);
 
     const updateBatteryLevel = () => {
