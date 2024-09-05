@@ -33,4 +33,6 @@ This plugin can be configured using homebridge-config-ui-x.  There are 4 require
 
 ### HomeKit
 
-At the moment, two switches will be available: 1 to toggle the Robovac's cleaning mode and another to emit the Locate beacon.  The battery level of the Robovac is also emitted.
+The default accessory is a switch that will run the Eufy Robovac in "auto" mode.  As part of this accessory, a sub-switch is also available to turn on the vacuum's location beacon.
+
+You may also create arbitrary room switches.  A room switch will direct your Eufy Robovac to clean an arbitrary set of rooms.  Use a comma-delimited list corresponding to the room numbers on your Eufy Robovac's map.
