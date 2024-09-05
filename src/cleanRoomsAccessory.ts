@@ -69,13 +69,13 @@ export class CleanRoomsPlatformAccessory {
       const on: boolean = value as boolean;
       if (on) {
         const rooms = this.accessory.context.rooms;
-        console.log('about to clean', rooms);
         await this.platform.robovac.cleanRooms(rooms);
       } else {
         await this.platform.robovac.pause();
         await sleep(3000);
         await this.platform.robovac.goHome(true);
       }
+      this.on = on;
     } catch (error: unknown) {
       this.platform.log.error(error as string);
     }
