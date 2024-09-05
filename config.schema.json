@@ -17,7 +17,7 @@
         "description": "IP Address of your Eufy Robovac",
         "type": "string",
         "required": true,
-        "default": "10.0.1.69"
+        "placeholder": "10.0.1.69"
       },
       "deviceId": {
         "title": "Tuya Device ID",
@@ -30,6 +30,29 @@
         "description": "Tuya/Eufy Device/Local Key (see: https://github.com/markbajaj/eufy-device-id-python)",
         "type": "string",
         "required": true
+      },
+      "roomSwitches": {
+        "description": "Per-Room Switches",
+        "type": "array",
+        "items": {
+          "title": "Switch",
+          "type": "object",
+          "properties": {
+            "name": {
+              "title": "Name",
+              "type": "string",
+              "placeholder": "Arbitrary name for this switch",
+              "required": true
+            },
+            "rooms": {
+              "title": "Rooms",
+              "type": "string",
+              "placeholder": "A room number or comma-separated list of room numbers",
+              "pattern": "^[0-9]+(,[0-9]+)*$",
+              "required": true
+            }
+          }
+        }
       }
     }
   }
