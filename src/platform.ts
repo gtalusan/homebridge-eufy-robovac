@@ -2,7 +2,6 @@ import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAcces
 
 import { DefaultPlatformAccessory } from './defaultAccessory.js';
 import { CleanRoomsPlatformAccessory } from './cleanRoomsAccessory.js';
-import { SpeakerPlatformAccessory } from './speakerAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 
 import { createRequire } from 'module';
@@ -87,18 +86,6 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
           new DefaultPlatformAccessory(this, accessory);
         },
       },
-      {
-        displayName: () => {
-          return `${this.config.name} Speaker`;
-        },
-        uuid: () => {
-          return this.api.hap.uuid.generate(`${this.config.name}-${this.config.ip}-speaker`);
-        },
-        make: (accessory: PlatformAccessory) => {
-          new SpeakerPlatformAccessory(this, accessory);
-        },
-      },
-
     ];
 
     const roomSwitches = this.config.roomSwitches;
