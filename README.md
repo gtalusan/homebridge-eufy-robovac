@@ -29,7 +29,7 @@ This plugin can be configured using homebridge-config-ui-x.  There are 4 require
 
 * Name - the name for your Robovac
 * IP Address - the IP address of your Robovac.  Configure your DHCP server to serve a static IP address to your Robovac for the best experience.
-* Tuya Device ID and Tuya Device Key - these can be obtained by following https://github.com/markbajaj/eufy-device-id-python
+* Tuya Device ID and Tuya Device Key - these can be obtained by following https://github.com/gtalusan/eufy-device-id-js
 
 ### HomeKit
 

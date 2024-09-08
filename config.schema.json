@@ -21,13 +21,13 @@
       },
       "deviceId": {
         "title": "Tuya Device ID",
-        "description": "Tuya/Eufy Device ID (see: https://github.com/markbajaj/eufy-device-id-python)",
+        "description": "Tuya/Eufy Device ID (see: https://github.com/gtalusan/eufy-device-id-js)",
         "type": "string",
         "required": true
       },
       "deviceKey": {
         "title": "Tuya Device Key",
-        "description": "Tuya/Eufy Device/Local Key (see: https://github.com/markbajaj/eufy-device-id-python)",
+        "description": "Tuya/Eufy Device/Local Key (see: https://github.com/gtalusan/eufy-device-id-js)",
         "type": "string",
         "required": true
       },
