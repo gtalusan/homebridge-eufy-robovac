@@ -58,6 +58,9 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
             }
           }, 2000);
         });
+        this.robovac.on('error', (error: string) => {
+          this.log.info(error);
+        });
         await this.robovac.initialize();
       } catch (error: unknown) {
         this.log.error(error as string);
