@@ -4,7 +4,7 @@
   "singular": true,
   "schema": {
     "type": "object",
-    "required": ["name", "title", "deviceId", "deviceKey"],
+    "required": ["name", "ip", "deviceId", "deviceKey"],
     "properties": {
       "name": {
         "title": "Name",
