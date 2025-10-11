@@ -4,32 +4,29 @@
   "singular": true,
   "schema": {
     "type": "object",
+    "required": ["name", "title", "deviceId", "deviceKey"],
     "properties": {
       "name": {
         "title": "Name",
         "description": "Arbitrary name for your Eufy Robovac",
         "type": "string",
-        "required": true,
         "default": "Eufy Robovac"
       },
       "ip": {
         "title": "IP Address",
         "description": "IP Address of your Eufy Robovac",
         "type": "string",
-        "required": true,
         "placeholder": "10.0.1.69"
       },
       "deviceId": {
         "title": "Tuya Device ID",
         "description": "Tuya/Eufy Device ID (see: https://github.com/gtalusan/eufy-device-id-js)",
-        "type": "string",
-        "required": true
+        "type": "string"
       },
       "deviceKey": {
         "title": "Tuya Device Key",
         "description": "Tuya/Eufy Device/Local Key (see: https://github.com/gtalusan/eufy-device-id-js)",
-        "type": "string",
-        "required": true
+        "type": "string"
       },
       "roomSwitches": {
         "description": "Per-Room Switches",
@@ -37,19 +34,18 @@
         "items": {
           "title": "Switch",
           "type": "object",
+          "required": ["name", "rooms"],
           "properties": {
             "name": {
               "title": "Name",
               "type": "string",
-              "placeholder": "Arbitrary name for this switch",
-              "required": true
+              "placeholder": "Arbitrary name for this switch"
             },
             "rooms": {
               "title": "Rooms",
               "type": "string",
               "placeholder": "A room number or comma-separated list of room numbers",
-              "pattern": "^[0-9]+(,[0-9]+)*$",
-              "required": true
+              "pattern": "^[0-9]+(,[0-9]+)*$"
             }
           }
         }
