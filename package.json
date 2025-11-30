@@ -2,7 +2,7 @@
   "name": "@george.talusan/homebridge-eufy-robovac",
   "displayName": "Homebridge Plugin for Eufy Robovac",
   "type": "module",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "description": "Homebridge Plugin for Eufy Robovac",
   "author": "George Talusan <george.talusan@gmail.com>",
   "license": "ISC",
@@ -23,7 +23,7 @@
   ],
   "main": "dist/index.js",
   "engines": {
-    "node": "^18.20.4 || ^20.16.0 || ^22.6.0",
+    "node": "^18.20.4 || ^20.16.0 || ^22.6.0 || ^24.11.0",
     "homebridge": "^1.8.5 || ^2.0.0-beta.0"
   },
   "scripts": {
