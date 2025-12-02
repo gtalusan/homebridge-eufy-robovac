@@ -74,6 +74,20 @@ export class DefaultPlatformAccessory {
     return this.platform.connected;
   }
 
+  supportsHome(): boolean {
+    if (!this.connected()) {
+      this.platform.log.warn('not connected');
+      return false;
+    }
+    let homeSupported = true;
+    try {
+      this.platform.robovac.goingHome();
+    } catch (error: unknown) {
+      homeSupported = false;
+    }
+    return homeSupported;
+  }
+
   async setOn(value: CharacteristicValue) {
     if (!this.connected()) {
       return;
@@ -84,8 +98,10 @@ export class DefaultPlatformAccessory {
         await this.platform.robovac.clean();
       } else {
         await this.platform.robovac.pause();
-        await sleep(3000);
-        await this.platform.robovac.goHome(true);
+        if (this.supportsHome()) {
+          await sleep(3000);
+          await this.platform.robovac.goHome(true);
+        }
       }
     } catch (error: unknown) {
       this.platform.log.error(error as string);
@@ -97,7 +113,7 @@ export class DefaultPlatformAccessory {
       return false;
     }
     try {
-      if (this.platform.robovac.goingHome()) {
+      if (this.supportsHome() && this.platform.robovac.goingHome()) {
         return false;
       }
       return !this.platform.robovac.docked();
