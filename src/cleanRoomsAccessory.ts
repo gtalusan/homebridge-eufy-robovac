@@ -61,6 +61,20 @@ export class CleanRoomsPlatformAccessory {
     return this.platform.connected;
   }
 
+  supportsHome(): boolean {
+    if (!this.connected()) {
+      this.platform.log.warn('not connected');
+      return false;
+    }
+    let homeSupported = true;
+    try {
+      this.platform.robovac.goingHome();
+    } catch (error: unknown) {
+      homeSupported = false;
+    }
+    return homeSupported;
+  }
+
   async setOn(value: CharacteristicValue) {
     if (!this.connected()) {
       return;
@@ -72,8 +86,10 @@ export class CleanRoomsPlatformAccessory {
         await this.platform.robovac.cleanRooms(rooms);
       } else {
         await this.platform.robovac.pause();
-        await sleep(3000);
-        await this.platform.robovac.goHome(true);
+        if (this.supportsHome()) {
+          await sleep(3000);
+          await this.platform.robovac.goHome(true);
+        }
       }
       this.on = on;
     } catch (error: unknown) {
@@ -86,7 +102,7 @@ export class CleanRoomsPlatformAccessory {
       return false;
     }
     try {
-      if (this.platform.robovac.goingHome() || this.platform.robovac.docked()) {
+      if ((this.supportsHome() && this.platform.robovac.goingHome()) || this.platform.robovac.docked()) {
         this.on = false;
         return false;
       }
