@@ -120,6 +120,8 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
     if (newAccessories.length > 0) {
       await this.api.matter.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, newAccessories);
     }
+
+    vacuumAccessory.setMatterReady();
   }
 
   discoverDevices() {

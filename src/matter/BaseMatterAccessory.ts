@@ -31,6 +31,7 @@ export abstract class BaseMatterAccessory implements MatterAccessory {
 
   protected readonly api: API;
   protected readonly log: Logging;
+  private matterReady = false;
 
   protected constructor(
     api: API,
@@ -65,8 +66,16 @@ export abstract class BaseMatterAccessory implements MatterAccessory {
   protected async updateState<K extends keyof ClusterStateMap>(cluster: K, attributes: Partial<ClusterStateMap[K]>, partId?: string): Promise<void>;
   protected async updateState(cluster: string, attributes: Record<string, unknown>, partId?: string): Promise<void>;
   protected async updateState(cluster: string, attributes: Record<string, unknown>, partId?: string): Promise<void> {
+    if (!this.matterReady) {
+      this.log.debug(`[${this.displayName}] Matter not ready, skipping ${cluster} state update`);
+      return;
+    }
     await this.api.matter.updateAccessoryState(this.UUID, cluster, attributes, partId);
     this.log.debug(`[${this.displayName}] Updated ${cluster} state:`, JSON.stringify(attributes));
+  }
+
+  public setMatterReady(): void {
+    this.matterReady = true;
   }
 
   protected async readState<K extends keyof ClusterStateMap>(cluster: K, partId?: string): Promise<Partial<ClusterStateMap[K]> | undefined>;

@@ -71,5 +71,3 @@ If you have `roomSwitches` configured, they are automatically mapped to Matter *
 3. Run this plugin as a child bridge (recommended)
 4. The plugin will log `Matter is available and enabled.` on startup
 
-> **Note:** Matter support requires a fix for a network interface timing issue in Homebridge 2.0. This fix is pending merge in [homebridge/homebridge#3910](https://github.com/homebridge/homebridge/pull/3910). Until it is merged, Matter may fail to start if you are using the `HOMEBRIDGE_INTERFACE` environment variable.
-

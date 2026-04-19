@@ -101,6 +101,7 @@ describe('BaseMatterAccessory', () => {
     it('should call api.matter.updateAccessoryState with UUID, cluster, and attributes', async () => {
       const config = makeConfig(api);
       const accessory = new TestMatterAccessory(api, log, config);
+      accessory.setMatterReady();
 
       await accessory.testUpdateState('onOff', { onOff: true });
 
@@ -112,6 +113,7 @@ describe('BaseMatterAccessory', () => {
     it('should pass partId through when provided', async () => {
       const config = makeConfig(api);
       const accessory = new TestMatterAccessory(api, log, config);
+      accessory.setMatterReady();
 
       await accessory.testUpdateState('onOff', { onOff: false }, 'part-1');
 

@@ -2,7 +2,7 @@
   "name": "@george.talusan/homebridge-eufy-robovac",
   "displayName": "Homebridge Plugin for Eufy Robovac",
   "type": "module",
-  "version": "0.0.13-beta.2",
+  "version": "0.0.13-beta.3",
   "description": "Homebridge Plugin for Eufy Robovac",
   "author": "George Talusan <george.talusan@gmail.com>",
   "license": "ISC",
@@ -26,7 +26,7 @@
   "main": "dist/index.js",
   "engines": {
     "node": "^22.10.0 || ^24.0.0",
-    "homebridge": ">=2.0.0-beta.85"
+    "homebridge": ">=2.0.0-beta.91"
   },
   "scripts": {
     "build": "rimraf ./dist && tsc",
@@ -41,7 +41,7 @@
     "@types/node": "^22.2.0",
     "@vitest/coverage-v8": "^4.1.4",
     "eslint": "^9.9.0",
-    "homebridge": "^2.0.0-beta.85",
+    "homebridge": "^2.0.0-beta.91",
     "nodemon": "^3.1.4",
     "rimraf": "^6.0.1",
     "ts-node": "^10.9.2",

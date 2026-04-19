@@ -25,7 +25,9 @@ describe('EufyRobovacMatterAccessory', () => {
     if (Object.keys(robovacOverrides).length > 0) {
       robovac = createMockRoboVac({ batteryLevel: 100, docked: true, activity: 'Sleeping', ...robovacOverrides });
     }
-    return new EufyRobovacMatterAccessory(api, log, config, robovac);
+    const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+    accessory.setMatterReady();
+    return accessory;
   }
 
   // ─── Cluster Structure (12 tests) ─────────────────────────────────
@@ -471,6 +473,7 @@ describe('EufyRobovacMatterAccessory', () => {
       robovac = createMockRoboVac({ activity: 'Sleeping', docked: true });
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
 
       robovac.emit('tuya.data');
 
@@ -483,6 +486,7 @@ describe('EufyRobovacMatterAccessory', () => {
       robovac = createMockRoboVac({ activity: 'Charging', docked: true });
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
 
       robovac.emit('tuya.data');
 
@@ -495,6 +499,7 @@ describe('EufyRobovacMatterAccessory', () => {
       robovac = createMockRoboVac({ activity: 'completed', docked: true });
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
 
       robovac.emit('tuya.data');
 
@@ -507,6 +512,7 @@ describe('EufyRobovacMatterAccessory', () => {
       robovac = createMockRoboVac({ goingHome: true, docked: false, activity: 'Running' });
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
 
       robovac.emit('tuya.data');
 
@@ -519,6 +525,7 @@ describe('EufyRobovacMatterAccessory', () => {
       robovac = createMockRoboVac({ goingHome: true, docked: false, activity: 'Running' });
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
 
       // Simulate robot arriving at dock — activity dp-refresh fires
       robovac.emit('event', { command: 'activity', value: 'Sleeping' });
@@ -531,6 +538,7 @@ describe('EufyRobovacMatterAccessory', () => {
     it('should transition to Docked(66) on event { command: activity, value: completed }', () => {
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
 
       robovac.emit('event', { command: 'activity', value: 'completed' });
 
@@ -542,6 +550,7 @@ describe('EufyRobovacMatterAccessory', () => {
     it('should transition to Charging(65) on event { command: activity, value: Charging }', () => {
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
 
       robovac.emit('event', { command: 'activity', value: 'Charging' });
 
@@ -554,6 +563,7 @@ describe('EufyRobovacMatterAccessory', () => {
       robovac = createMockRoboVac({ goingHome: false, docked: true, activity: 'Sleeping' });
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
 
       robovac.emit('event', { command: 'goHome', value: false });
 
@@ -566,6 +576,7 @@ describe('EufyRobovacMatterAccessory', () => {
     it('should set operationalState=2 (Paused) on event { command: playPause, value: false }', () => {
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
 
       robovac.emit('event', { command: 'playPause', value: false });
 
@@ -577,6 +588,7 @@ describe('EufyRobovacMatterAccessory', () => {
     it('should set operationalState=1 (Running) on event { command: playPause, value: true }', () => {
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
 
       robovac.emit('event', { command: 'playPause', value: true });
 
@@ -588,6 +600,7 @@ describe('EufyRobovacMatterAccessory', () => {
     it('should set operationalState=3 (Error) on event { command: error } with non-zero error', () => {
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
 
       robovac.emit('event', { command: 'error', value: 'stuck_wheel' });
 
