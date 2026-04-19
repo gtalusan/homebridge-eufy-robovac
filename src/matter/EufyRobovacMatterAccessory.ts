@@ -73,6 +73,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
           batPercentRemaining: Math.max(0, Math.min(200, Math.round(EufyRobovacMatterAccessory.safeBatteryLevel(robovac) * 2))),
           batChargeLevel: EufyRobovacMatterAccessory.computeChargeLevel(EufyRobovacMatterAccessory.safeBatteryLevel(robovac)),
           batReplaceability: 1,
+          batChargeState: EufyRobovacMatterAccessory.computeChargeState(robovac),
         },
 
         rvcRunMode: {
@@ -398,6 +399,8 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     this.logDebug(`updating operational state: ${state}`);
     this.currentOperationalState = state;
     await this.updateState('rvcOperationalState', { operationalState: state });
+    const batChargeState = state === OP_CHARGING ? 1 : 3;
+    await this.updateState('powerSource', { batChargeState });
   }
 
   public async updateRunMode(mode: number): Promise<void> {
@@ -451,5 +454,13 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       return 1; // Warning
     }
     return 0; // Ok
+  }
+
+  static computeChargeState(robovac: RoboVac): number {
+    try {
+      return robovac.activity() === 'Charging' ? 1 : 3; // 1=IsCharging, 3=IsNotCharging
+    } catch {
+      return 0; // Unknown
+    }
   }
 }
