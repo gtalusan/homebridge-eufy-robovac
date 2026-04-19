@@ -278,6 +278,12 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
 
   // ─── State Sync ────────────────────────────────────────────────────
 
+  public override setMatterReady(): void {
+    super.setMatterReady();
+    this.logDebug('Matter ready — syncing initial state');
+    this.syncState();
+  }
+
   private setupEventListeners(): void {
     this.robovac.on('tuya.data', () => {
       this.logDebug('tuya.data event received — syncing state');

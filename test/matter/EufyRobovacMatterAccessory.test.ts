@@ -443,6 +443,20 @@ describe('EufyRobovacMatterAccessory', () => {
   // ─── State Sync: device → Homebridge (12 tests) ───────────────────
 
   describe('State Sync (device → Homebridge)', () => {
+    it('should sync current device state immediately when Matter becomes ready', () => {
+      robovac = createMockRoboVac({ batteryLevel: 75, activity: 'Sleeping', docked: true });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+
+      accessory.setMatterReady();
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'powerSource', { batPercentRemaining: 150, batChargeLevel: 0 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 66 }, undefined,
+      );
+    });
     it('should NOT update powerSource on tuya.data event when Matter is not ready', () => {
       robovac = createMockRoboVac({ batteryLevel: 50 });
       config = createMockConfig();
