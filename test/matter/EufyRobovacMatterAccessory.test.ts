@@ -506,6 +506,54 @@ describe('EufyRobovacMatterAccessory', () => {
       );
     });
 
+    it('should transition to Docked(66) on event { command: activity, value: Sleeping } (dp-refresh docking)', () => {
+      robovac = createMockRoboVac({ goingHome: true, docked: false, activity: 'Running' });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+
+      // Simulate robot arriving at dock — activity dp-refresh fires
+      robovac.emit('event', { command: 'activity', value: 'Sleeping' });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 66 }, undefined,
+      );
+    });
+
+    it('should transition to Docked(66) on event { command: activity, value: completed }', () => {
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+
+      robovac.emit('event', { command: 'activity', value: 'completed' });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 66 }, undefined,
+      );
+    });
+
+    it('should transition to Charging(65) on event { command: activity, value: Charging }', () => {
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+
+      robovac.emit('event', { command: 'activity', value: 'Charging' });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 65 }, undefined,
+      );
+    });
+
+    it('should sync state when goHome flag clears (event { command: goHome, value: false })', () => {
+      robovac = createMockRoboVac({ goingHome: false, docked: true, activity: 'Sleeping' });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+
+      robovac.emit('event', { command: 'goHome', value: false });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 66 }, undefined,
+      );
+      void accessory;
+    });
+
     it('should set operationalState=2 (Paused) on event { command: playPause, value: false }', () => {
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);

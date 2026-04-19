@@ -288,6 +288,25 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       this.logDebug(`device event: ${event.command} = ${JSON.stringify(event.value)}`);
       if (event.command === 'battery') {
         // powerSource cluster does not support dynamic updates; battery is set at init
+      } else if (event.command === 'activity') {
+        const activity = event.value as string;
+        if (activity === 'Sleeping' || activity === 'completed') {
+          this.logInfo(`activity changed to '${activity}' — transitioning to Docked`);
+          this.updateOperationalState(OP_DOCKED).catch(e => this.logError('Failed to update state:', e));
+          this.updateRunMode(RUN_IDLE).catch(e => this.logError('Failed to update state:', e));
+        } else if (activity === 'Charging') {
+          this.logInfo('activity changed to Charging — transitioning to Charging state');
+          this.updateOperationalState(OP_CHARGING).catch(e => this.logError('Failed to update state:', e));
+        } else {
+          this.logDebug(`activity changed to '${activity}' — running full state sync`);
+          this.syncState();
+        }
+      } else if (event.command === 'goHome') {
+        if (event.value === false) {
+          // goHome flag cleared — robot has stopped seeking charger, re-evaluate actual state
+          this.logInfo('goHome flag cleared — syncing state');
+          this.syncState();
+        }
       } else if (event.command === 'playPause') {
         if (event.value === false) {
           this.updateOperationalState(OP_PAUSED).catch(e => this.logError('Failed to update state:', e));
