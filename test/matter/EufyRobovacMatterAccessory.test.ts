@@ -443,18 +443,44 @@ describe('EufyRobovacMatterAccessory', () => {
   // ─── State Sync: device → Homebridge (12 tests) ───────────────────
 
   describe('State Sync (device → Homebridge)', () => {
-    it('should NOT update powerSource on tuya.data event (powerSource cluster does not support dynamic updates)', () => {
+    it('should NOT update powerSource on tuya.data event when Matter is not ready', () => {
       robovac = createMockRoboVac({ batteryLevel: 50 });
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      // setMatterReady() intentionally NOT called
 
       robovac.emit('tuya.data');
 
       const powerSourceCalls = (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>)
         .mock.calls.filter((c: unknown[]) => c[1] === 'powerSource');
       expect(powerSourceCalls).toHaveLength(0);
-      // suppress unused var warning
       void accessory;
+    });
+
+    it('should update powerSource on tuya.data event when Matter is ready', () => {
+      robovac = createMockRoboVac({ batteryLevel: 50, activity: 'Sleeping', docked: true });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('tuya.data');
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'powerSource', { batPercentRemaining: 100, batChargeLevel: 0 }, undefined,
+      );
+    });
+
+    it('should update powerSource on battery event', () => {
+      robovac = createMockRoboVac({ batteryLevel: 15 });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('event', { command: 'battery', value: 15 });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'powerSource', { batPercentRemaining: 30, batChargeLevel: 2 }, undefined,
+      );
     });
 
     it('should set batChargeLevel=0 (Ok) when battery is 100%', () => {

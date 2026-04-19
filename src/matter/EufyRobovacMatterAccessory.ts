@@ -287,7 +287,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     this.robovac.on('event', (event: RobovacEvent) => {
       this.logDebug(`device event: ${event.command} = ${JSON.stringify(event.value)}`);
       if (event.command === 'battery') {
-        // powerSource cluster does not support dynamic updates; battery is set at init
+        this.updateBatteryState().catch(e => this.logError('Failed to update battery state:', e));
       } else if (event.command === 'activity') {
         const activity = event.value as string;
         if (activity === 'Sleeping' || activity === 'completed') {
@@ -333,10 +333,8 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       return;
     }
     this.syncOperationalState();
+    this.updateBatteryState().catch(e => this.logError('Failed to sync battery state:', e));
   }
-
-  // powerSource cluster does not support dynamic updates via updateAccessoryState(),
-  // so battery level is set once at construction time and not synced afterward.
 
   private syncOperationalState(): void {
     if (!this.robovac.connected) {
@@ -383,6 +381,14 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
   public async updateRunMode(mode: number): Promise<void> {
     this.logDebug(`updating run mode: ${mode === RUN_IDLE ? 'Idle' : 'Cleaning'} (${mode})`);
     await this.updateState('rvcRunMode', { currentMode: mode });
+  }
+
+  private async updateBatteryState(): Promise<void> {
+    const level = EufyRobovacMatterAccessory.safeBatteryLevel(this.robovac);
+    const batPercentRemaining = Math.max(0, Math.min(200, Math.round(level * 2)));
+    const batChargeLevel = EufyRobovacMatterAccessory.computeChargeLevel(level);
+    this.logDebug(`updating battery: ${level}% (batPercentRemaining=${batPercentRemaining}, batChargeLevel=${batChargeLevel})`);
+    await this.updateState('powerSource', { batPercentRemaining, batChargeLevel });
   }
 
   public getOperationalState(): number {
