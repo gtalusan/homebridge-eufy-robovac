@@ -548,6 +548,22 @@ describe('EufyRobovacMatterAccessory', () => {
       );
     });
 
+    it('should set operationalState=64 (SeekingCharger) when activity=Recharge', () => {
+      robovac = createMockRoboVac({ activity: 'Recharge', docked: false });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('tuya.data');
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 64 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcRunMode', { currentMode: 0 }, undefined,
+      );
+    });
+
     it('should set operationalState=64 (SeekingCharger) when goingHome()=true', () => {
       robovac = createMockRoboVac({ goingHome: true, docked: false, activity: 'Running' });
       config = createMockConfig();
@@ -596,6 +612,21 @@ describe('EufyRobovacMatterAccessory', () => {
 
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
         accessory.UUID, 'rvcOperationalState', { operationalState: 65 }, undefined,
+      );
+    });
+
+    it('should transition to SeekingCharger(64) and runMode=0 (Idle) on event { command: activity, value: Recharge }', () => {
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('event', { command: 'activity', value: 'Recharge' });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 64 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcRunMode', { currentMode: 0 }, undefined,
       );
     });
 

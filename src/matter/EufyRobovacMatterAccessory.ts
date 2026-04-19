@@ -303,6 +303,10 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
         } else if (activity === 'Charging') {
           this.logInfo('activity changed to Charging — transitioning to Charging state');
           this.updateOperationalState(OP_CHARGING).catch(e => this.logError('Failed to update state:', e));
+        } else if (activity === 'Recharge') {
+          this.logInfo('activity changed to Recharge — transitioning to SeekingCharger state');
+          this.updateOperationalState(OP_SEEKING_CHARGER).catch(e => this.logError('Failed to update state:', e));
+          this.updateRunMode(RUN_IDLE).catch(e => this.logError('Failed to update state:', e));
         } else {
           this.logDebug(`activity changed to '${activity}' — running full state sync`);
           this.syncState();
@@ -370,6 +374,12 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       }
       if (activity === 'Charging') {
         this.updateOperationalState(OP_CHARGING);
+        return;
+      }
+
+      if (activity === 'Recharge') {
+        this.updateOperationalState(OP_SEEKING_CHARGER);
+        this.updateRunMode(RUN_IDLE);
         return;
       }
 
