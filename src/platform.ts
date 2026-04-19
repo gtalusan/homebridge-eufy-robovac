@@ -3,7 +3,6 @@ import type { API, Characteristic, DynamicPlatformPlugin, Logging, MatterAccesso
 import { DefaultPlatformAccessory } from './defaultAccessory.js';
 import { CleanRoomsPlatformAccessory } from './cleanRoomsAccessory.js';
 import { EufyRobovacMatterAccessory } from './matter/EufyRobovacMatterAccessory.js';
-import { FindMyRobotMatterAccessory } from './matter/FindMyRobotMatterAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 
 import { createRequire } from 'module';
@@ -108,7 +107,6 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
 
   async registerMatterAccessories(): Promise<void> {
     const vacuumAccessory = new EufyRobovacMatterAccessory(this.api, this.log, this.config, this.robovac);
-    const findMyAccessory = new FindMyRobotMatterAccessory(this.api, this.log, this.config, this.robovac);
 
     const newAccessories: MatterAccessory[] = [];
 
@@ -117,13 +115,6 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
       this.log.info('Registering new Matter accessory:', vacuumAccessory.displayName);
     } else {
       this.log.info('Restoring cached Matter accessory:', vacuumAccessory.displayName);
-    }
-
-    if (!this.matterAccessories.has(findMyAccessory.UUID)) {
-      newAccessories.push(findMyAccessory.toAccessory());
-      this.log.info('Registering new Matter accessory:', findMyAccessory.displayName);
-    } else {
-      this.log.info('Restoring cached Matter accessory:', findMyAccessory.displayName);
     }
 
     if (newAccessories.length > 0) {

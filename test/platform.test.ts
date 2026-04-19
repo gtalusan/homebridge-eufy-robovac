@@ -154,13 +154,13 @@ describe('EufyRobovacHomebridgePlatform', () => {
       expect(vacuumAcc!.serialNumber).toBe('test-device-id');
     });
 
-    it('should create FindMyRobotMatterAccessory', async () => {
+    it('should include identify cluster on vacuum accessory for Play Sound to Locate', async () => {
       new EufyRobovacHomebridgePlatform(log, config, api);
       await api._triggerDidFinishLaunching();
       const calls = (api.matter.registerPlatformAccessories as ReturnType<typeof vi.fn>).mock.calls;
       const registeredAccessories = calls[0][2] as MatterAccessory[];
-      const findAcc = registeredAccessories.find(a => a.model === 'RoboVac Find');
-      expect(findAcc).toBeDefined();
+      const vacuumAcc = registeredAccessories.find(a => a.model === 'RoboVac');
+      expect(vacuumAcc!.clusters?.identify).toEqual({ identifyTime: 0, identifyType: 3 });
     });
 
     it('should include serviceArea cluster when roomSwitches in config', async () => {

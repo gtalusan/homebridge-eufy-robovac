@@ -118,10 +118,15 @@ describe('EufyRobovacMatterAccessory', () => {
       expect(api.matter.uuid.generate).toHaveBeenCalledWith(expect.stringContaining('10.0.1.69'));
     });
 
-    it('should set manufacturer to Eufy and model to Robovac', () => {
+    it('should set manufacturer to Eufy and model to RoboVac', () => {
       const accessory = makeAccessory();
       expect(accessory.manufacturer).toBe('Eufy');
       expect(accessory.model).toBe('RoboVac');
+    });
+
+    it('should have identify cluster with identifyTime=0 and identifyType=3 (AudibleBeep)', () => {
+      const accessory = makeAccessory();
+      expect(accessory.clusters?.identify).toEqual({ identifyTime: 0, identifyType: 3 });
     });
 
     it('should use config.deviceId as serialNumber', () => {
@@ -394,6 +399,33 @@ describe('EufyRobovacMatterAccessory', () => {
       await expect(
         accessory.handlers!.serviceArea.skipArea({ skippedArea: 99 }),
       ).rejects.toThrow();
+    });
+  });
+
+  // ─── Handler: identify (3 tests) ─────────────────────────────────
+
+  describe('Handler: identify', () => {
+    it('should call robovac.locate(true) when identify is requested', async () => {
+      const accessory = makeAccessory();
+      robovac.connected = true;
+      await accessory.handlers!.identify.identify({ identifyTime: 5 });
+      expect(robovac.locate).toHaveBeenCalledWith(true);
+    });
+
+    it('should throw when disconnected', async () => {
+      const accessory = makeAccessory({}, { connected: false });
+      await expect(
+        accessory.handlers!.identify.identify({ identifyTime: 5 }),
+      ).rejects.toThrow();
+    });
+
+    it('should rethrow errors from robovac.locate()', async () => {
+      const accessory = makeAccessory();
+      robovac.connected = true;
+      robovac.locate = vi.fn().mockRejectedValue(new Error('locate failed'));
+      await expect(
+        accessory.handlers!.identify.identify({ identifyTime: 5 }),
+      ).rejects.toThrow('locate failed');
     });
   });
 
