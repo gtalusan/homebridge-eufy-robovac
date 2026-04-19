@@ -1,6 +1,12 @@
 # Ignore source code
 src
 
+# Test files
+test
+
+# Research files
+research
+
 # ------------- Defaults ------------- #
 
 # gitHub actions
@@ -11,6 +17,9 @@ eslint.config.js
 
 # typescript
 tsconfig.json
+
+# vitest
+vitest.config.ts
 
 # vscode
 .vscode

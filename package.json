@@ -19,16 +19,19 @@
     "homebridge-eufy-robovac",
     "eufy",
     "robovac",
-    "smartvac"
+    "smartvac",
+    "matter",
+    "thread"
   ],
   "main": "dist/index.js",
   "engines": {
-    "node": "^18.20.4 || ^20.16.0 || ^22.6.0 || ^24.11.0",
-    "homebridge": "^1.8.5 || ^2.0.0-beta.0"
+    "node": "^22.10.0 || ^24.0.0",
+    "homebridge": ">=2.0.0-beta.85"
   },
   "scripts": {
     "build": "rimraf ./dist && tsc",
     "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
     "prepublishOnly": "npm run lint && npm run build",
     "watch": "npm run build && npm link && nodemon"
   },
@@ -36,13 +39,15 @@
     "@eslint/js": "^9.9.0",
     "@types/eslint__js": "^8.42.3",
     "@types/node": "^22.2.0",
+    "@vitest/coverage-v8": "^4.1.4",
     "eslint": "^9.9.0",
-    "homebridge": "^2.0.0-beta.0",
+    "homebridge": "^2.0.0-beta.85",
     "nodemon": "^3.1.4",
     "rimraf": "^6.0.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4",
-    "typescript-eslint": "^8.0.1"
+    "typescript-eslint": "^8.0.1",
+    "vitest": "^4.1.4"
   },
   "dependencies": {
     "@george.talusan/eufy-robovac-js": "^0.0.9"

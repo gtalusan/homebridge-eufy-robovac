@@ -33,8 +33,40 @@ This plugin can be configured using homebridge-config-ui-x.  There are 4 require
 * IP Address - the IP address of your Robovac.  Configure your DHCP server to serve a static IP address to your Robovac for the best experience.
 * Tuya Device ID and Tuya Device Key - these can be obtained by following https://github.com/gtalusan/eufy-device-id-js
 
-### HomeKit
+### HomeKit (HAP)
 
 The default accessory is a switch that will run the Eufy Robovac in "auto" mode.  As part of this accessory, a sub-switch is also available to turn on the vacuum's location beacon.
 
 You may also create arbitrary room switches.  A room switch will direct your Eufy Robovac to clean an arbitrary set of rooms.  Use a comma-delimited list corresponding to the room numbers on your Eufy Robovac's map.
+
+### Matter over Thread (Homebridge 2.0+)
+
+When running on **Homebridge 2.0** (beta.85 or later) with Matter enabled, this plugin automatically exposes your Eufy Robovac as a native **Matter Robotic Vacuum Cleaner** device. No additional configuration is required — if Matter is available and enabled, it just works alongside the existing HAP accessories.
+
+#### Matter Capabilities
+
+| Feature | Matter Cluster | Description |
+|---|---|---|
+| Run Mode | `rvcRunMode` | Idle / Cleaning modes |
+| Clean Mode | `rvcCleanMode` | Vacuum mode (single mode for Eufy) |
+| Operational State | `rvcOperationalState` | Running, Paused, Docked, Charging, Seeking Charger, Error |
+| Battery | `powerSource` | Battery level (0.5% increments), charge level (Ok/Warning/Critical) |
+| Room Selection | `serviceArea` | Maps your configured room switches to Matter areas (see below) |
+| Find My Robot | `onOff` (separate device) | Exposed as an On/Off Switch to trigger the locate beacon |
+
+#### Room Selection via Matter
+
+If you have `roomSwitches` configured, they are automatically mapped to Matter **Service Areas**:
+
+- Each room switch becomes a selectable area in the Matter ecosystem
+- All areas are assigned to a single floor map ("Home")
+- Area names come directly from your room switch `name` field
+- You can select/deselect areas and the vacuum will clean the corresponding rooms
+- An empty area selection resets to "all areas"
+
+#### Enabling Matter
+
+1. Update to Homebridge 2.0 (beta.85+)
+2. Enable Matter in your Homebridge settings
+3. Run this plugin as a child bridge (recommended)
+4. The plugin will log `Matter is available and enabled.` on startup
