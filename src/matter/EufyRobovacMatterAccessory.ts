@@ -234,8 +234,8 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
   private async handleGoHome(): Promise<void> {
     this.logInfo('go home requested');
     this.ensureConnected();
-    if (this.currentOperationalState === OP_DOCKED) {
-      this.logWarn('go home requested but already docked');
+    if (this.currentOperationalState === OP_DOCKED || this.currentOperationalState === OP_CHARGING) {
+      this.logWarn('go home requested but already docked/charging');
       throw new MatterStatus.InvalidInState('Already docked');
     }
 
@@ -366,11 +366,6 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       if (this.robovac.goingHome()) {
         this.updateOperationalState(OP_SEEKING_CHARGER);
         return;
-      }
-
-      if (this.robovac.docked()) {
-        this.updateOperationalState(OP_DOCKED);
-        this.updateRunMode(RUN_IDLE);
       }
     } catch (error: unknown) {
       this.logError('Failed to sync operational state:', error);

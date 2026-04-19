@@ -297,10 +297,19 @@ describe('EufyRobovacMatterAccessory', () => {
       );
     });
 
-    it('should throw InvalidInState when already docked', async () => {
+    it('should throw InvalidInState when already docked (state=66)', async () => {
       const accessory = makeAccessory({}, { docked: true, activity: 'Sleeping' });
       robovac.connected = true;
       // Default is docked (66)
+      await expect(
+        accessory.handlers!.rvcOperationalState.goHome(),
+      ).rejects.toThrow();
+    });
+
+    it('should throw InvalidInState when already charging (state=65)', async () => {
+      const accessory = makeAccessory({}, { docked: true, activity: 'Charging' });
+      robovac.connected = true;
+      await accessory.updateOperationalState(65);
       await expect(
         accessory.handlers!.rvcOperationalState.goHome(),
       ).rejects.toThrow();
