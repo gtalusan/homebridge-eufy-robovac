@@ -27,6 +27,12 @@ const OP_DOCKED = 66;
 const RUN_IDLE = 0;
 const RUN_CLEANING = 1;
 
+// Clean speed mode constants
+const CLEAN_SPEED_QUIET = 0;
+const CLEAN_SPEED_STANDARD = 1;
+const CLEAN_SPEED_TURBO = 2;
+const CLEAN_SPEED_MAX = 3;
+
 // Identify type: 3 = AudibleBeep (plays a sound to locate the device)
 const IDENTIFY_TYPE_AUDIBLE_BEEP = 3;
 
@@ -36,6 +42,7 @@ type RoboVac = any;
 export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
   private currentOperationalState: number;
   private selectedAreaIds: number[];
+  private currentCleanSpeed: number;
   private readonly roomMap: Array<{ name: string; rooms: number[] }>;
   private readonly robovac: RoboVac;
 
@@ -86,9 +93,12 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
 
         rvcCleanMode: {
           supportedModes: [
-            { label: 'Vacuum', mode: 0, modeTags: [{ value: 16385 }] },
+            { label: 'Quiet', mode: CLEAN_SPEED_QUIET, modeTags: [{ value: 2 }, { value: 16385 }] },
+            { label: 'Standard', mode: CLEAN_SPEED_STANDARD, modeTags: [{ value: 16385 }] },
+            { label: 'Turbo', mode: CLEAN_SPEED_TURBO, modeTags: [{ value: 1 }, { value: 16385 }] },
+            { label: 'Max', mode: CLEAN_SPEED_MAX, modeTags: [{ value: 16384 }, { value: 16385 }] },
           ],
-          currentMode: 0,
+          currentMode: CLEAN_SPEED_STANDARD,
         },
 
         rvcOperationalState: {
@@ -134,8 +144,38 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
           changeToMode: async (request: MatterRequests.ChangeToMode) => this.handleChangeRunMode(request),
         },
         rvcCleanMode: {
-          changeToMode: async (_request: MatterRequests.ChangeToMode) => {
-            this.logDebug('clean mode change requested (single mode, no-op)');
+          changeToMode: async (request: MatterRequests.ChangeToMode) => {
+            this.logInfo(`clean mode change requested: ${request.newMode}`);
+            this.ensureConnected();
+            const { newMode } = request;
+
+            try {
+              switch (newMode) {
+              case CLEAN_SPEED_QUIET:
+                this.logDebug('setting clean speed to Quiet');
+                await this.robovac.setCleanSpeedQuiet();
+                break;
+              case CLEAN_SPEED_STANDARD:
+                this.logDebug('setting clean speed to Standard');
+                await this.robovac.setCleanSpeedStandard();
+                break;
+              case CLEAN_SPEED_TURBO:
+                this.logDebug('setting clean speed to Turbo');
+                await this.robovac.setCleanSpeedTurbo();
+                break;
+              case CLEAN_SPEED_MAX:
+                this.logDebug('setting clean speed to Max');
+                await this.robovac.setCleanSpeedMax();
+                break;
+              default:
+                this.logWarn(`unknown clean speed mode: ${newMode}`);
+              }
+              this.currentCleanSpeed = newMode;
+              await this.updateCleanMode(newMode);
+            } catch (error: unknown) {
+              this.logError('Failed to set clean speed:', error);
+              throw error;
+            }
           },
         },
         rvcOperationalState: {
@@ -156,6 +196,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     this.roomMap = roomMap;
     this.selectedAreaIds = [...allAreaIds];
     this.currentOperationalState = OP_DOCKED;
+    this.currentCleanSpeed = CLEAN_SPEED_STANDARD;
 
     this.setupEventListeners();
     this.logInfo('initialized and ready.');
@@ -336,6 +377,20 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
           this.logWarn(`device error reported: ${event.value}`);
           this.updateOperationalState(OP_ERROR).catch(e => this.logError('Failed to update state:', e));
         }
+      } else if (event.command === 'cleanSpeed') {
+        const speedMap: { [key: string]: number } = {
+          'Quiet': CLEAN_SPEED_QUIET,
+          'Standard': CLEAN_SPEED_STANDARD,
+          'Turbo': CLEAN_SPEED_TURBO,
+          'Max': CLEAN_SPEED_MAX,
+        };
+        const cleanSpeed = speedMap[event.value as string];
+        if (cleanSpeed !== undefined) {
+          this.logDebug(`clean speed changed to ${event.value}`);
+          this.updateCleanMode(cleanSpeed).catch(e => this.logError('Failed to update clean mode:', e));
+        } else {
+          this.logWarn(`unknown clean speed: ${event.value}`);
+        }
       }
     });
 
@@ -350,6 +405,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       return;
     }
     this.syncOperationalState();
+    this.syncCleanSpeed();
     this.updateBatteryState().catch(e => this.logError('Failed to sync battery state:', e));
   }
 
@@ -369,7 +425,10 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       this.logDebug(`syncing operational state — activity: ${activity}`);
 
       if (activity === 'Sleeping' || activity === 'completed') {
-        this.updateOperationalState(OP_DOCKED);
+        const docked = EufyRobovacMatterAccessory.safeDockedState(this.robovac);
+        const level = EufyRobovacMatterAccessory.safeBatteryLevel(this.robovac);
+        const state = docked && level < 100 ? OP_CHARGING : OP_DOCKED;
+        this.updateOperationalState(state);
         this.updateRunMode(RUN_IDLE);
         return;
       }
@@ -393,6 +452,21 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     }
   }
 
+  private syncCleanSpeed(): void {
+    if (!this.robovac.connected) {
+      return;
+    }
+    try {
+      const cleanSpeed = EufyRobovacMatterAccessory.safeCleanSpeed(this.robovac);
+      if (cleanSpeed !== this.currentCleanSpeed) {
+        this.logDebug(`syncing clean speed: ${cleanSpeed}`);
+        this.updateCleanMode(cleanSpeed).catch(e => this.logError('Failed to sync clean speed:', e));
+      }
+    } catch (error: unknown) {
+      this.logError('Failed to sync clean speed:', error);
+    }
+  }
+
   // ─── State Update Helpers ──────────────────────────────────────────
 
   public async updateOperationalState(state: number): Promise<void> {
@@ -406,6 +480,12 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
   public async updateRunMode(mode: number): Promise<void> {
     this.logDebug(`updating run mode: ${mode === RUN_IDLE ? 'Idle' : 'Cleaning'} (${mode})`);
     await this.updateState('rvcRunMode', { currentMode: mode });
+  }
+
+  public async updateCleanMode(mode: number): Promise<void> {
+    const modeLabel = ['Quiet', 'Standard', 'Turbo', 'Max'][mode] ?? `Unknown (${mode})`;
+    this.logDebug(`updating clean mode: ${modeLabel} (${mode})`);
+    await this.updateState('rvcCleanMode', { currentMode: mode });
   }
 
   private async updateBatteryState(): Promise<void> {
@@ -446,6 +526,34 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     }
   }
 
+  static safeDockedState(robovac: RoboVac): boolean {
+    try {
+      return robovac.docked();
+    } catch {
+      return false;
+    }
+  }
+
+  static safeCleanSpeed(robovac: RoboVac): number {
+    try {
+      const speedMap: { [key: string]: number } = {
+        'Quiet': CLEAN_SPEED_QUIET,
+        'Standard': CLEAN_SPEED_STANDARD,
+        'Turbo': CLEAN_SPEED_TURBO,
+        'Max': CLEAN_SPEED_MAX,
+      };
+      // dps['102'] contains the clean speed value string
+      const cleanSpeedValue = robovac.dps?.['102'];
+      if (cleanSpeedValue === undefined) {
+        return CLEAN_SPEED_STANDARD;
+      }
+      const mappedSpeed = speedMap[cleanSpeedValue];
+      return mappedSpeed !== undefined ? mappedSpeed : CLEAN_SPEED_STANDARD;
+    } catch {
+      return CLEAN_SPEED_STANDARD;
+    }
+  }
+
   static computeChargeLevel(percentage: number): number {
     if (percentage < 20) {
       return 2; // Critical
@@ -458,7 +566,16 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
 
   static computeChargeState(robovac: RoboVac): number {
     try {
-      return robovac.activity() === 'Charging' ? 1 : 3; // 1=IsCharging, 3=IsNotCharging
+      const activity = robovac.activity();
+      if (activity === 'Charging') {
+        return 1; // IsCharging
+      }
+      if ((activity === 'Sleeping' || activity === 'completed')
+        && this.safeDockedState(robovac)
+        && this.safeBatteryLevel(robovac) < 100) {
+        return 1; // IsCharging
+      }
+      return 3; // IsNotCharging
     } catch {
       return 0; // Unknown
     }

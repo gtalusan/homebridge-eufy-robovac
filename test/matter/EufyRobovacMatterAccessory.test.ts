@@ -55,11 +55,14 @@ describe('EufyRobovacMatterAccessory', () => {
       expect(modes[1]).toEqual({ label: 'Cleaning', mode: 1, modeTags: [{ value: 16385 }] });
     });
 
-    it('should have rvcCleanMode cluster with at least Vacuum mode (mode 0, tag 16385)', () => {
+    it('should have rvcCleanMode cluster with 4 clean speed modes', () => {
       const accessory = makeAccessory();
       const modes = accessory.clusters?.rvcCleanMode?.supportedModes;
-      expect(modes).toHaveLength(1);
-      expect(modes[0]).toEqual({ label: 'Vacuum', mode: 0, modeTags: [{ value: 16385 }] });
+      expect(modes).toHaveLength(4);
+      expect(modes[0]).toEqual({ label: 'Quiet', mode: 0, modeTags: [{ value: 2 }, { value: 16385 }] });
+      expect(modes[1]).toEqual({ label: 'Standard', mode: 1, modeTags: [{ value: 16385 }] });
+      expect(modes[2]).toEqual({ label: 'Turbo', mode: 2, modeTags: [{ value: 1 }, { value: 16385 }] });
+      expect(modes[3]).toEqual({ label: 'Max', mode: 3, modeTags: [{ value: 16384 }, { value: 16385 }] });
     });
 
     it('should have rvcOperationalState cluster with states: 0,1,2,3,64,65,66', () => {
@@ -443,18 +446,40 @@ describe('EufyRobovacMatterAccessory', () => {
   // ─── State Sync: device → Homebridge (12 tests) ───────────────────
 
   describe('State Sync (device → Homebridge)', () => {
-    it('should sync current device state immediately when Matter becomes ready', () => {
+    it('should sync charging state immediately when Matter becomes ready for a docked vac below 100%', async () => {
       robovac = createMockRoboVac({ batteryLevel: 75, activity: 'Sleeping', docked: true });
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
 
       accessory.setMatterReady();
+      await Promise.resolve();
+      await Promise.resolve();
 
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
         accessory.UUID, 'powerSource', { batPercentRemaining: 150, batChargeLevel: 0 }, undefined,
       );
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 65 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'powerSource', { batChargeState: 1 }, undefined,
+      );
+    });
+
+    it('should sync docked state immediately when Matter becomes ready for a full docked vac', async () => {
+      robovac = createMockRoboVac({ batteryLevel: 100, activity: 'Sleeping', docked: true });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+
+      accessory.setMatterReady();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
         accessory.UUID, 'rvcOperationalState', { operationalState: 66 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'powerSource', { batChargeState: 3 }, undefined,
       );
     });
     it('should NOT update powerSource on tuya.data event when Matter is not ready', () => {
