@@ -762,5 +762,81 @@ describe('EufyRobovacMatterAccessory', () => {
         .mock.calls.filter((c: unknown[]) => c[1] === 'powerSource');
       expect(powerSourceCalls).toHaveLength(0);
     });
+
+    it('should transition to Charging(65) on event { command: activity, value: Sleeping } when docked and battery < 100', () => {
+      robovac = createMockRoboVac({ activity: 'Running', batteryLevel: 75, docked: false });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      // Simulate robot arriving at dock with low battery — activity=Sleeping event fires
+      (robovac.docked as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      robovac.emit('event', { command: 'activity', value: 'Sleeping' });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 65 }, undefined,
+      );
+    });
+
+    it('should transition to Docked(66) on event { command: activity, value: Sleeping } when docked and battery = 100', () => {
+      robovac = createMockRoboVac({ activity: 'Running', batteryLevel: 100, docked: false });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      // Simulate robot already fully charged and now sleeping — activity=Sleeping event fires
+      (robovac.docked as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      robovac.emit('event', { command: 'activity', value: 'Sleeping' });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 66 }, undefined,
+      );
+    });
+
+    it('should transition to Charging(65) on event { command: activity, value: completed } when docked and battery < 100', () => {
+      robovac = createMockRoboVac({ activity: 'Running', batteryLevel: 50, docked: false });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      // Simulate robot completing a job and docking to charge — activity=completed event fires
+      (robovac.docked as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      robovac.emit('event', { command: 'activity', value: 'completed' });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 65 }, undefined,
+      );
+    });
+
+    it('should update clean speed cache on cleanSpeed event and skip redundant sync', () => {
+      robovac = createMockRoboVac();
+      robovac.dps = { '102': 'Standard' };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      // Clear previous calls from initialization
+      (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>).mockClear();
+
+      // Simulate device-side clean speed change: Standard → Turbo
+      robovac.dps['102'] = 'Turbo';
+      robovac.emit('event', { command: 'cleanSpeed', value: 'Turbo' });
+
+      // Verify the speed update was sent
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcCleanMode', { currentMode: 2 }, undefined,
+      );
+
+      // Reset calls
+      (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>).mockClear();
+
+      // Now trigger a sync — should NOT update since cache is current
+      robovac.emit('tuya.data');
+
+      // Verify no rvcCleanMode update was sent
+      const cleanModeUpdates = (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>)
+        .mock.calls.filter((c: unknown[]) => c[1] === 'rvcCleanMode');
+      expect(cleanModeUpdates).toHaveLength(0);
+    });
   });
 });

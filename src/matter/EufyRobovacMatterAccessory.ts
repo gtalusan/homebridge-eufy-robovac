@@ -339,8 +339,11 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       } else if (event.command === 'activity') {
         const activity = event.value as string;
         if (activity === 'Sleeping' || activity === 'completed') {
-          this.logInfo(`activity changed to '${activity}' — transitioning to Docked`);
-          this.updateOperationalState(OP_DOCKED).catch(e => this.logError('Failed to update state:', e));
+          const docked = EufyRobovacMatterAccessory.safeDockedState(this.robovac);
+          const level = EufyRobovacMatterAccessory.safeBatteryLevel(this.robovac);
+          const state = docked && level < 100 ? OP_CHARGING : OP_DOCKED;
+          this.logInfo(`activity changed to '${activity}' — transitioning to ${state === OP_CHARGING ? 'Charging' : 'Docked'}`);
+          this.updateOperationalState(state).catch(e => this.logError('Failed to update state:', e));
           this.updateRunMode(RUN_IDLE).catch(e => this.logError('Failed to update state:', e));
         } else if (activity === 'Charging') {
           this.logInfo('activity changed to Charging — transitioning to Charging state');
@@ -485,6 +488,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
   public async updateCleanMode(mode: number): Promise<void> {
     const modeLabel = ['Quiet', 'Standard', 'Turbo', 'Max'][mode] ?? `Unknown (${mode})`;
     this.logDebug(`updating clean mode: ${modeLabel} (${mode})`);
+    this.currentCleanSpeed = mode;
     await this.updateState('rvcCleanMode', { currentMode: mode });
   }
 
