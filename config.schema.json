@@ -29,17 +29,17 @@
         "type": "string"
       },
       "roomSwitches": {
-        "description": "Per-Room Switches",
+        "description": "Rooms - configure according to the eufy clean app.  These are optional.  If no rooms, then the Eufy Robovac will be configured for Auto mode.",
         "type": "array",
         "items": {
-          "title": "Switch",
+          "title": "Room",
           "type": "object",
           "required": ["name", "rooms"],
           "properties": {
             "name": {
               "title": "Name",
               "type": "string",
-              "placeholder": "Arbitrary name for this switch"
+              "placeholder": "Name for this room"
             },
             "rooms": {
               "title": "Rooms",

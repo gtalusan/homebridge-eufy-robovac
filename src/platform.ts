@@ -1,7 +1,6 @@
 import type { API, Characteristic, DynamicPlatformPlugin, Logging, MatterAccessory, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
 
 import { DefaultPlatformAccessory } from './defaultAccessory.js';
-import { CleanRoomsPlatformAccessory } from './cleanRoomsAccessory.js';
 import { EufyRobovacMatterAccessory } from './matter/EufyRobovacMatterAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 
@@ -9,11 +8,6 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
 const { RoboVac } = require('@george.talusan/eufy-robovac-js');
-
-interface RoomSwitch {
-  name: string;
-  rooms: string;
-}
 
 export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service;
@@ -138,24 +132,6 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
         },
       },
     ];
-
-    const roomSwitches = this.config.roomSwitches;
-    if (roomSwitches) {
-      roomSwitches.forEach((roomSwitch: RoomSwitch) => {
-        accessories.push({
-          displayName: () => {
-            return `${roomSwitch.name}`;
-          },
-          uuid: () => {
-            return this.api.hap.uuid.generate(`${this.config.name}-${this.config.ip}-${roomSwitch.name}-${roomSwitch.rooms}`);
-          },
-          make: (accessory: PlatformAccessory) => {
-            accessory.context.rooms = roomSwitch.rooms.split(',').map(Number);
-            new CleanRoomsPlatformAccessory(this, accessory);
-          },
-        });
-      });
-    }
 
     for (const a of accessories) {
       const uuid = a.uuid();

@@ -43,9 +43,6 @@ vi.mock('module', () => ({
 vi.mock('../src/defaultAccessory.js', () => ({
   DefaultPlatformAccessory: vi.fn(),
 }));
-vi.mock('../src/cleanRoomsAccessory.js', () => ({
-  CleanRoomsPlatformAccessory: vi.fn(),
-}));
 
 const { EufyRobovacHomebridgePlatform } = await import('../src/platform.js');
 
@@ -112,14 +109,11 @@ describe('EufyRobovacHomebridgePlatform', () => {
       expect(platform.accessories).toContainEqual(fakeAccessory);
     });
 
-    it('should create DefaultPlatformAccessory and CleanRoomsPlatformAccessory for HAP discovery', async () => {
-      config = createMockConfig({
-        roomSwitches: [{ name: 'Living Room', rooms: '1' }],
-      });
+    it('should create DefaultPlatformAccessory for HAP discovery', async () => {
       new EufyRobovacHomebridgePlatform(log, config, api);
       await api._triggerDidFinishLaunching();
       // Should register 2 HAP accessories (default + 1 room switch)
-      expect(api.registerPlatformAccessories).toHaveBeenCalledTimes(2);
+      expect(api.registerPlatformAccessories).toHaveBeenCalledTimes(1);
     });
   });
 
