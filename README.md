@@ -50,9 +50,28 @@ When running on **Homebridge 2.0** (beta.85 or later) with Matter enabled, this 
 | Run Mode | `rvcRunMode` | Idle / Cleaning modes |
 | Clean Mode | `rvcCleanMode` | Vacuum mode |
 | Operational State | `rvcOperationalState` | Running, Paused, Docked, Charging, Seeking Charger, Error |
+| Error State | `rvcOperationalState` | Mapped error codes with semantic details |
 | Battery | `powerSource` | Battery level (0.5% increments), charge level (Ok/Warning/Critical) |
 | Room Selection | `serviceArea` | Maps your configured room switches to Matter areas (see below) |
 | Play Sound to Locate | `identify` | Uses HomeKit's native "Play Sound to Locate" action to trigger the locate beacon |
+
+#### Error State Mapping
+
+This plugin maps all 21 Eufy RoboVac error codes to Matter.js `RvcOperationalState.ErrorState` enum values, providing semantic device error reporting:
+
+| Eufy Error | Matter ErrorState | Meaning |
+|---|---|---|
+| no error | NoError (0) | Device operating normally |
+| wheel stuck / wheel suspended / device trapped | Stuck (65) | Device is mechanically stuck or trapped |
+| wheel module stuck | WheelsJammed (76) | Wheels are jammed |
+| side brush / rolling brush stuck | BrushJammed (77) | Brush mechanism is jammed |
+| low battery | LowBattery (72) | Battery level is critically low |
+| magnetic boundary / restricted area detected | CannotReachTargetArea (73) | Device cannot reach target area |
+| insert dust collector | DustBinMissing (66) | Dust bin is missing |
+| laser/wall sensor errors | NavigationSensorObscured (78) | Sensors are blocked or dirty |
+| base blocked | Stuck (65) | Charging dock is blocked |
+
+**Consumable Maintenance Alerts** (battery, wheel module, brush, suction fan, sensors) are logged as warnings and do not trigger error states, as they represent maintenance needs rather than operational failures.
 
 #### Room Selection via Matter
 

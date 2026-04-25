@@ -3,10 +3,20 @@ import type { API, Logging, MatterRequests, PlatformConfig } from 'homebridge';
 import { MatterStatus } from 'homebridge';
 
 import { BaseMatterAccessory } from './BaseMatterAccessory.js';
+import {
+  mapEufyErrorToMatterErrorState,
+  getEufyErrorDescription,
+  getMatterErrorStateName,
+} from './errorMapping.js';
 
 interface RobovacEvent {
   command: string;
   value: boolean | number | string | object | null;
+}
+
+interface ConsumableAlert {
+  consumable: string;
+  duration: number;
 }
 
 interface RoomSwitch {
@@ -43,6 +53,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
   private currentOperationalState: number;
   private selectedAreaIds: number[];
   private currentCleanSpeed: number;
+  private currentErrorState: number;
   private readonly roomMap: Array<{ name: string; rooms: number[] }>;
   private readonly robovac: RoboVac;
 
@@ -197,6 +208,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     this.selectedAreaIds = [...allAreaIds];
     this.currentOperationalState = OP_DOCKED;
     this.currentCleanSpeed = CLEAN_SPEED_STANDARD;
+    this.currentErrorState = 0; // NoError
 
     this.setupEventListeners();
     this.logInfo('initialized and ready.');
@@ -376,9 +388,13 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
           this.updateRunMode(RUN_CLEANING).catch(e => this.logError('Failed to update state:', e));
         }
       } else if (event.command === 'error') {
-        if (event.value && event.value !== 'no error') {
-          this.logWarn(`device error reported: ${event.value}`);
-          this.updateOperationalState(OP_ERROR).catch(e => this.logError('Failed to update state:', e));
+        const errorValue = event.value as string;
+        if (errorValue && errorValue !== 'no error') {
+          this.logWarn(`device error reported: ${errorValue}`);
+          this.updateErrorState(errorValue).catch(e => this.logError('Failed to update error state:', e));
+          this.updateOperationalState(OP_ERROR).catch(e => this.logError('Failed to update operational state:', e));
+        } else {
+          this.clearErrorState().catch(e => this.logError('Failed to clear error state:', e));
         }
       } else if (event.command === 'cleanSpeed') {
         const speedMap: { [key: string]: number } = {
@@ -400,6 +416,13 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     this.robovac.on('tuya.disconnected', () => {
       this.logWarn('RoboVac disconnected');
     });
+
+    this.robovac.on('alert', (alert: ConsumableAlert) => {
+      this.logInfo(`consumable maintenance alert: ${JSON.stringify(alert)}`);
+      if (alert.consumable) {
+        this.logWarn(`[MAINTENANCE WARNING] ${alert.consumable}: ${alert.duration}`);
+      }
+    });
   }
 
   private syncState(): void {
@@ -420,9 +443,12 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       const error = this.robovac.error();
       if (error && error !== 'no error') {
         this.logWarn(`device error: ${error}`);
+        this.updateErrorState(error).catch(e => this.logError('Failed to update error state:', e));
         this.updateOperationalState(OP_ERROR);
         return;
       }
+
+      this.clearErrorState().catch(e => this.logError('Failed to clear error state:', e));
 
       const activity = this.robovac.activity();
       this.logDebug(`syncing operational state — activity: ${activity}`);
@@ -490,6 +516,37 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     this.logDebug(`updating clean mode: ${modeLabel} (${mode})`);
     this.currentCleanSpeed = mode;
     await this.updateState('rvcCleanMode', { currentMode: mode });
+  }
+
+  private async updateErrorState(eufyErrorCode: string | number): Promise<void> {
+    const matterErrorStateId = mapEufyErrorToMatterErrorState(eufyErrorCode);
+    const matterErrorStateName = getMatterErrorStateName(matterErrorStateId);
+    const eufyErrorDescription = getEufyErrorDescription(eufyErrorCode);
+
+    this.logDebug(`mapping eufy error '${eufyErrorCode}' (${eufyErrorDescription}) to Matter ErrorState ${matterErrorStateId} (${matterErrorStateName})`);
+
+    this.currentErrorState = matterErrorStateId;
+
+    // Create ErrorStateStruct with mapped error state
+    // Note: errorStateLabel is only valid for manufacturer-specific error codes (128-191)
+    // Since we use only standard error states (0-78), we omit errorStateLabel
+    const operationalError: Record<string, unknown> = {
+      errorStateId: matterErrorStateId,
+      errorStateDetails: eufyErrorDescription,
+    };
+
+    this.logDebug(`updating operational error: ${JSON.stringify(operationalError)}`);
+    await this.updateState('rvcOperationalState', { operationalError });
+  }
+
+  private async clearErrorState(): Promise<void> {
+    this.logDebug('clearing error state');
+    this.currentErrorState = 0;
+    const operationalError: Record<string, unknown> = {
+      errorStateId: 0, // NoError
+      errorStateDetails: 'No error',
+    };
+    await this.updateState('rvcOperationalState', { operationalError });
   }
 
   private async updateBatteryState(): Promise<void> {
