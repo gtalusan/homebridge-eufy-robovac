@@ -69,9 +69,9 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     const allAreaIds = roomMap.map((_r, i) => i);
 
     super(api, log, {
-      UUID: api.matter.uuid.generate(`${config.name}-${config.ip}`),
+      UUID: api.matter!.uuid.generate(`${config.name}-${config.ip}`),
       displayName: `${config.name}`,
-      deviceType: api.matter.deviceTypes.RoboticVacuumCleaner,
+      deviceType: api.matter!.deviceTypes.RoboticVacuumCleaner,
       serialNumber,
       manufacturer: 'Eufy',
       model: 'RoboVac',

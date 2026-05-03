@@ -70,7 +70,7 @@ export abstract class BaseMatterAccessory implements MatterAccessory {
       this.log.debug(`[${this.displayName}] Matter not ready, skipping ${cluster} state update`);
       return;
     }
-    await this.api.matter.updateAccessoryState(this.UUID, cluster, attributes, partId);
+    await this.api.matter!.updateAccessoryState(this.UUID, cluster, attributes, partId);
     this.log.debug(`[${this.displayName}] Updated ${cluster} state:`, JSON.stringify(attributes));
   }
 
@@ -81,7 +81,7 @@ export abstract class BaseMatterAccessory implements MatterAccessory {
   protected async readState<K extends keyof ClusterStateMap>(cluster: K, partId?: string): Promise<Partial<ClusterStateMap[K]> | undefined>;
   protected async readState(cluster: string, partId?: string): Promise<Record<string, unknown> | undefined>;
   protected async readState(cluster: string, partId?: string): Promise<Record<string, unknown> | undefined> {
-    return await this.api.matter.getAccessoryState(this.UUID, cluster, partId);
+    return await this.api.matter!.getAccessoryState(this.UUID, cluster, partId);
   }
 
   protected logInfo(message: string, ...args: unknown[]): void {
