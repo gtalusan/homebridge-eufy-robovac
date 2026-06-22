@@ -266,15 +266,28 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     }
 
     const data = await response.json() as Record<string, unknown>;
-    const devices = this.findArray(data, ['data.devices', 'devices', 'list', 'vacs'])
+    let devices = this.findArray(data, ['data.devices', 'devices', 'list', 'vacs'])
       .map(value => value && typeof value === 'object' ? value as Record<string, unknown> : undefined)
       .map(value => this.asRecord(value?.device) ?? value)
       .filter((value): value is Record<string, unknown> => !!value);
     this.discoveryNotes.push(`device-list:count=${devices.length} keys=${this.safeKeys(data).join(',')}`);
 
+    if (devices.length === 0) {
+      devices = await this.getFallbackDevices();
+    }
+
     const device = this.selectDiscoveredDevice(devices);
 
     if (!device) {
+      if (this.config.deviceId && this.config.deviceModel) {
+        const mqtt = this.mqttFromCredentials(mqttCredentials, this.config.deviceId, this.config.deviceModel);
+        this.discoveryNotes.push('device:fallback-config-id-model');
+        return {
+          id: this.config.deviceId,
+          model: this.config.deviceModel,
+          mqtt,
+        };
+      }
       return undefined;
     }
 
@@ -346,6 +359,32 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       ?? data;
     this.discoveryNotes.push(`mqtt-info:keys=${this.safeKeys(credentials).join(',')}`);
     return credentials;
+  }
+
+  private async getFallbackDevices(): Promise<Record<string, unknown>[]> {
+    if (!this.accessToken) {
+      this.discoveryNotes.push('fallback-device-list:skipped-missing-access-token');
+      return [];
+    }
+
+    const response = await fetch(`${DEFAULT_EUFY_API_BASE_URL}/v1/device/v2`, {
+      headers: {
+        ...this.eufyHeaders('Home'),
+        token: this.accessToken,
+      },
+    });
+
+    if (!response.ok) {
+      this.discoveryNotes.push(`fallback-device-list:http-${response.status}`);
+      return [];
+    }
+
+    const data = await response.json() as Record<string, unknown>;
+    const devices = this.findArray(data, ['data.devices', 'devices'])
+      .map(value => value && typeof value === 'object' ? value as Record<string, unknown> : undefined)
+      .filter((value): value is Record<string, unknown> => !!value);
+    this.discoveryNotes.push(`fallback-device-list:count=${devices.length} keys=${this.safeKeys(data).join(',')}`);
+    return devices;
   }
 
   private mqttFromCredentials(credentials: Record<string, unknown> | undefined, deviceId: string, deviceModel?: string): EufyCleanDevice['mqtt'] {
