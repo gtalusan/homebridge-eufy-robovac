@@ -30,11 +30,41 @@ interface MqttPublish {
   payload: Buffer;
 }
 
+type CloudApiMode = 'novel' | 'legacy';
+
 const DEFAULT_API_BASE_URL = 'https://home-api.eufylife.com';
 const DEFAULT_EUFY_API_BASE_URL = 'https://api.eufylife.com';
 const DEFAULT_AIOT_API_BASE_URL = 'https://aiot-clean-api-pr.eufylife.com';
 const DEFAULT_MQTT_PORT = 8883;
 const USER_AGENT = 'EufyHome-Android-3.1.3-753';
+
+const NOVEL_DPS = {
+  PLAY_PAUSE: '152',
+  WORK_STATUS: '153',
+  CLEANING_PARAMETERS: '154',
+  CLEAN_SPEED: '158',
+  FIND_ROBOT: '160',
+  BATTERY_LEVEL: '163',
+  GO_HOME: '173',
+  ERROR_CODE: '177',
+} as const;
+
+const LEGACY_DPS = {
+  PLAY_PAUSE: '2',
+  WORK_MODE: '5',
+  GO_HOME: '101',
+  CLEAN_SPEED: '102',
+  FIND_ROBOT: '103',
+  BATTERY_LEVEL: '104',
+  ERROR_CODE: '106',
+} as const;
+
+const CLEAN_SPEED_VALUES: Record<string, number> = {
+  Quiet: 0,
+  Standard: 1,
+  Turbo: 2,
+  Max: 3,
+};
 
 export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient {
   public connected = false;
@@ -52,6 +82,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private keepAlive?: NodeJS.Timeout;
   private readonly openudid: string;
   private readonly discoveryNotes: string[] = [];
+  private cloudApiMode: CloudApiMode = 'novel';
 
   constructor(private readonly config: EufyCleanConfig) {
     super();
@@ -293,7 +324,9 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
 
     const deviceId = this.findString(device, ['device_sn', 'id', 'device_id', 'deviceId']) ?? this.config.deviceId ?? '';
     const deviceModel = this.config.deviceModel ?? this.deviceModelFrom(device);
+    this.cloudApiMode = this.detectApiMode(device);
     this.discoveryNotes.push(`device:selected id=${deviceId ? 'yes' : 'no'} model=${deviceModel ?? 'missing'} keys=${this.safeKeys(device).join(',')}`);
+    this.discoveryNotes.push(`device:api-mode=${this.cloudApiMode}`);
     const mqtt = this.mqttFromCredentials(mqttCredentials, deviceId, deviceModel);
 
     return {
@@ -336,6 +369,23 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     }
 
     return undefined;
+  }
+
+  private detectApiMode(device: Record<string, unknown>): CloudApiMode {
+    const dps = this.asRecord(this.getPath(device, 'dps'))
+      ?? this.asRecord(this.getPath(device, 'params'))
+      ?? this.asRecord(this.getPath(device, 'device.dps'));
+
+    if (dps) {
+      const keys = new Set(Object.keys(dps));
+      const hasNovelDps = Object.values(NOVEL_DPS).some(key => keys.has(key));
+      const hasLegacyDps = Object.values(LEGACY_DPS).some(key => keys.has(key));
+      if (hasLegacyDps && !hasNovelDps) {
+        return 'legacy';
+      }
+    }
+
+    return 'novel';
   }
 
   private async getMqttCredentials(): Promise<Record<string, unknown> | undefined> {
@@ -482,8 +532,14 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     if (!topics.length || !deviceId) {
       throw new Error('Eufy Clean command topics and deviceId are required.');
     }
-    const encoded = this.wrapCommand(deviceId, command, payload);
+    const dataPayload = this.commandPayload(command, payload);
+    const encoded = this.wrapCommand(deviceId, dataPayload);
+    this.emit(
+      'debug',
+      `Publishing Eufy Clean ${command} command using ${this.cloudApiMode} DPS keys: ${Object.keys(dataPayload).join(', ')}`,
+    );
     for (const topic of topics) {
+      this.emit('debug', `Publishing Eufy Clean MQTT command to ${topic}`);
       this.socket.write(this.publishPacket(topic, encoded));
     }
   }
@@ -526,8 +582,9 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     }
   }
 
-  private handlePublish({ payload }: MqttPublish): void {
+  private handlePublish({ topic, payload }: MqttPublish): void {
     const status = this.codec.decodeStatus(this.unwrapPayload(payload));
+    this.emit('debug', `Received Eufy Clean MQTT status from ${topic} with keys: ${Object.keys(status.dps).join(', ') || 'none'}`);
     this.setState(status.dps);
   }
 
@@ -666,9 +723,90 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     return mqtt?.statusTopics ?? (mqtt?.statusTopic ? [mqtt.statusTopic] : []);
   }
 
-  private wrapCommand(deviceId: string, command: CloudCommand, payload: Record<string, unknown>): Buffer {
-    const dataPayload = this.codec.encodeCommand(deviceId, command, payload).toString('utf8');
-    const clientId = this.config.mqtt?.clientId ?? `android-eufy_home-eufy_android_${this.openudid}_${this.mqttUserId ?? ''}`;
+  private commandPayload(command: CloudCommand, payload: Record<string, unknown>): Record<string, unknown> {
+    return this.cloudApiMode === 'legacy'
+      ? this.legacyCommandPayload(command, payload)
+      : this.novelCommandPayload(command, payload);
+  }
+
+  private novelCommandPayload(command: CloudCommand, payload: Record<string, unknown>): Record<string, unknown> {
+    switch (command) {
+    case 'clean':
+      return { [NOVEL_DPS.PLAY_PAUSE]: this.encodeModeCtrlRequest(0, { autoClean: true }) };
+    case 'pause':
+      return { [NOVEL_DPS.PLAY_PAUSE]: this.encodeModeCtrlRequest(13) };
+    case 'resume':
+      return { [NOVEL_DPS.PLAY_PAUSE]: this.encodeModeCtrlRequest(14) };
+    case 'goHome':
+      return { [NOVEL_DPS.PLAY_PAUSE]: this.encodeModeCtrlRequest(6) };
+    case 'cleanRooms':
+      return { [NOVEL_DPS.PLAY_PAUSE]: this.encodeModeCtrlRequest(1), rooms: payload.rooms };
+    case 'locate':
+      return { [NOVEL_DPS.FIND_ROBOT]: payload.enabled ?? true };
+    case 'cleanSpeed':
+      return { [NOVEL_DPS.CLEAN_SPEED]: CLEAN_SPEED_VALUES[String(payload.speed)] ?? CLEAN_SPEED_VALUES.Standard };
+    }
+  }
+
+  private legacyCommandPayload(command: CloudCommand, payload: Record<string, unknown>): Record<string, unknown> {
+    switch (command) {
+    case 'clean':
+      return { [LEGACY_DPS.WORK_MODE]: 'auto', [LEGACY_DPS.PLAY_PAUSE]: true };
+    case 'pause':
+      return { [LEGACY_DPS.PLAY_PAUSE]: false };
+    case 'resume':
+      return { [LEGACY_DPS.PLAY_PAUSE]: true };
+    case 'goHome':
+      return { [LEGACY_DPS.GO_HOME]: payload.enabled ?? true };
+    case 'cleanRooms':
+      return { [LEGACY_DPS.WORK_MODE]: 'room', [LEGACY_DPS.PLAY_PAUSE]: true, rooms: payload.rooms };
+    case 'locate':
+      return { [LEGACY_DPS.FIND_ROBOT]: payload.enabled ?? true };
+    case 'cleanSpeed':
+      return { [LEGACY_DPS.CLEAN_SPEED]: payload.speed ?? 'Standard' };
+    }
+  }
+
+  private encodeModeCtrlRequest(method: number, options: { autoClean?: boolean } = {}): string {
+    const fields = [this.protoVarintField(1, method)];
+    if (options.autoClean) {
+      fields.push(this.protoBytesField(3, this.protoVarintField(1, 1)));
+    }
+    const body = Buffer.concat(fields);
+    return Buffer.concat([this.protoVarint(body.length), body]).toString('base64');
+  }
+
+  private protoVarintField(fieldNumber: number, value: number): Buffer {
+    return Buffer.concat([
+      this.protoVarint((fieldNumber << 3) | 0),
+      this.protoVarint(value),
+    ]);
+  }
+
+  private protoBytesField(fieldNumber: number, value: Buffer): Buffer {
+    return Buffer.concat([
+      this.protoVarint((fieldNumber << 3) | 2),
+      this.protoVarint(value.length),
+      value,
+    ]);
+  }
+
+  private protoVarint(value: number): Buffer {
+    const bytes: number[] = [];
+    let remaining = value >>> 0;
+    do {
+      let byte = remaining & 0x7f;
+      remaining >>>= 7;
+      if (remaining > 0) {
+        byte |= 0x80;
+      }
+      bytes.push(byte);
+    } while (remaining > 0);
+    return Buffer.from(bytes);
+  }
+
+  private wrapCommand(deviceId: string, dataPayload: Record<string, unknown>): Buffer {
+    const clientId = this.commandClientId();
     return Buffer.from(JSON.stringify({
       head: {
         client_id: clientId,
@@ -689,6 +827,11 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
         t: Date.now(),
       }),
     }));
+  }
+
+  private commandClientId(): string {
+    const clientId = this.config.mqtt?.clientId ?? `android-eufy_home-eufy_android_${this.openudid}_${this.mqttUserId ?? ''}`;
+    return clientId.replace(/-\d+$/, '');
   }
 
   private unwrapPayload(payload: Buffer): Buffer {
