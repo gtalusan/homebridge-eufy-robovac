@@ -61,6 +61,8 @@ const CLEAN_SPEED_VALUES: Record<string, number> = {
   Max: 3,
 };
 
+const NOVEL_MODEL_PREFIXES = new Set(['T2080', 'T2351', 'T2352', 'T2353']);
+
 export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient {
   public connected = false;
   public deviceId?: string;
@@ -324,7 +326,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
 
     const deviceId = this.findString(device, ['device_sn', 'id', 'device_id', 'deviceId']) ?? this.config.deviceId ?? '';
     const deviceModel = this.config.deviceModel ?? this.deviceModelFrom(device);
-    this.cloudApiMode = this.detectApiMode(device);
+    this.cloudApiMode = this.detectApiMode(device, deviceModel);
     this.setCommandUserFromDevice(device);
     this.discoveryNotes.push(`device:selected id=${deviceId ? 'yes' : 'no'} model=${deviceModel ?? 'missing'} keys=${this.safeKeys(device).join(',')}`);
     this.discoveryNotes.push(`device:api-mode=${this.cloudApiMode}`);
@@ -372,7 +374,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     return undefined;
   }
 
-  private detectApiMode(device: Record<string, unknown>): CloudApiMode {
+  private detectApiMode(device: Record<string, unknown>, deviceModel?: string): CloudApiMode {
     const dps = this.asRecord(this.getPath(device, 'dps'))
       ?? this.asRecord(this.getPath(device, 'params'))
       ?? this.asRecord(this.getPath(device, 'device.dps'));
@@ -386,7 +388,9 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       }
     }
 
-    return 'novel';
+    const fallbackMode = deviceModel && NOVEL_MODEL_PREFIXES.has(deviceModel) ? 'novel' : 'legacy';
+    this.discoveryNotes.push(`device:api-mode-fallback=${fallbackMode}`);
+    return fallbackMode;
   }
 
   private setCommandUserFromDevice(device: Record<string, unknown>): void {
@@ -555,16 +559,18 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     if (!topics.length || !deviceId) {
       throw new Error('Eufy Clean command topics and deviceId are required.');
     }
-    const dataPayload = this.commandPayload(command, payload);
-    const encoded = this.wrapCommand(deviceId, dataPayload);
-    this.emit(
-      'debug',
-      `Publishing Eufy Clean ${command} command using ${this.cloudApiMode} DPS keys: ${Object.keys(dataPayload).join(', ')}`,
-    );
+    const dataPayloads = this.commandPayloads(command, payload);
     const qos = this.config.mqtt?.qos ?? 1;
-    for (const topic of topics) {
-      this.emit('debug', `Publishing Eufy Clean MQTT command to ${topic}`);
-      await this.publish(topic, encoded, qos);
+    for (const dataPayload of dataPayloads) {
+      const encoded = this.wrapCommand(deviceId, dataPayload);
+      this.emit(
+        'debug',
+        `Publishing Eufy Clean ${command} command using ${this.cloudApiMode} DPS keys: ${Object.keys(dataPayload).join(', ')}`,
+      );
+      for (const topic of topics) {
+        this.emit('debug', `Publishing Eufy Clean MQTT command to ${topic}`);
+        await this.publish(topic, encoded, qos);
+      }
     }
   }
 
@@ -653,10 +659,10 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     return mqtt?.statusTopics ?? (mqtt?.statusTopic ? [mqtt.statusTopic] : []);
   }
 
-  private commandPayload(command: CloudCommand, payload: Record<string, unknown>): Record<string, unknown> {
+  private commandPayloads(command: CloudCommand, payload: Record<string, unknown>): Record<string, unknown>[] {
     return this.cloudApiMode === 'legacy'
       ? this.legacyCommandPayload(command, payload)
-      : this.novelCommandPayload(command, payload);
+      : [this.novelCommandPayload(command, payload)];
   }
 
   private novelCommandPayload(command: CloudCommand, payload: Record<string, unknown>): Record<string, unknown> {
@@ -678,22 +684,22 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     }
   }
 
-  private legacyCommandPayload(command: CloudCommand, payload: Record<string, unknown>): Record<string, unknown> {
+  private legacyCommandPayload(command: CloudCommand, payload: Record<string, unknown>): Record<string, unknown>[] {
     switch (command) {
     case 'clean':
-      return { [LEGACY_DPS.WORK_MODE]: 'auto', [LEGACY_DPS.PLAY_PAUSE]: true };
+      return [{ [LEGACY_DPS.WORK_MODE]: 'auto' }, { [LEGACY_DPS.PLAY_PAUSE]: true }];
     case 'pause':
-      return { [LEGACY_DPS.PLAY_PAUSE]: false };
+      return [{ [LEGACY_DPS.PLAY_PAUSE]: false }];
     case 'resume':
-      return { [LEGACY_DPS.PLAY_PAUSE]: true };
+      return [{ [LEGACY_DPS.PLAY_PAUSE]: true }];
     case 'goHome':
-      return { [LEGACY_DPS.GO_HOME]: payload.enabled ?? true };
+      return [{ [LEGACY_DPS.GO_HOME]: payload.enabled ?? true }];
     case 'cleanRooms':
-      return { [LEGACY_DPS.WORK_MODE]: 'room', [LEGACY_DPS.PLAY_PAUSE]: true, rooms: payload.rooms };
+      return [{ [LEGACY_DPS.WORK_MODE]: 'room', rooms: payload.rooms }, { [LEGACY_DPS.PLAY_PAUSE]: true }];
     case 'locate':
-      return { [LEGACY_DPS.FIND_ROBOT]: payload.enabled ?? true };
+      return [{ [LEGACY_DPS.FIND_ROBOT]: payload.enabled ?? true }];
     case 'cleanSpeed':
-      return { [LEGACY_DPS.CLEAN_SPEED]: payload.speed ?? 'Standard' };
+      return [{ [LEGACY_DPS.CLEAN_SPEED]: payload.speed ?? 'Standard' }];
     }
   }
 
