@@ -27,11 +27,92 @@ Multiple child bridges will enable you to control multiple Eufy RoboVacs.  To co
 
 ### Configuration
 
-This plugin can be configured using homebridge-config-ui-x.  There are 4 required fields.
+This plugin can be configured using homebridge-config-ui-x.
 
-* Name - the name for your RoboVac
-* IP Address - the IP address of your RoboVac.  Configure your DHCP server to serve a static IP address to your RoboVac for the best experience.
-* Tuya Device ID and Tuya Device Key - these can be obtained by following https://github.com/gtalusan/eufy-device-id-js
+The plugin supports two connection modes:
+
+* Legacy Tuya 3.3 local control - the original local LAN control path for older RoboVac models.
+* Eufy Clean cloud/MQTT - the newer Eufy Clean cloud control path for models that no longer expose the older local Tuya 3.3 API.
+
+Existing configurations continue to use Legacy Tuya mode by default.  To opt in to the newer cloud/MQTT API, set `transport` to `eufy-clean-cloud`.
+
+#### Legacy Tuya 3.3 Local Control
+
+Use this mode for older RoboVacs that still support local Tuya 3.3 control.
+
+Required fields:
+
+* `name` - the name for your RoboVac
+* `transport` - `legacy-tuya`, or omit this field because it is the default
+* `ip` - the IP address of your RoboVac.  Configure your DHCP server to serve a static IP address to your RoboVac for the best experience.
+* `deviceId` - the Tuya/Eufy device ID
+* `deviceKey` - the Tuya/Eufy local key
+
+The Tuya device ID and local key can be obtained by following https://github.com/gtalusan/eufy-device-id-js.
+
+Example:
+
+```json
+{
+  "platform": "EufyRobovacHomebridgePlugin",
+  "name": "Eufy RoboVac",
+  "transport": "legacy-tuya",
+  "ip": "10.0.1.69",
+  "deviceId": "your-tuya-device-id",
+  "deviceKey": "your-tuya-local-key"
+}
+```
+
+#### Eufy Clean Cloud/MQTT
+
+Use this mode for newer Eufy Clean RoboVacs that communicate through Eufy's cloud and MQTT API.
+
+Required fields:
+
+* `name` - the name for your RoboVac
+* `transport` - `eufy-clean-cloud`
+* `deviceId` - the Eufy Clean device ID
+* `mqttHost` - MQTT broker host
+* `mqttClientId` - MQTT client ID
+* `mqttCommandTopic` - topic used to send commands to the RoboVac
+* `mqttStatusTopic` - topic used to receive status updates from the RoboVac
+
+Optional fields:
+
+* `eufyEmail` and `eufyPassword` - Eufy Clean account credentials, used to request an access token when one is not supplied
+* `eufyAccessToken` - existing Eufy Clean access token
+* `country` - two-letter account country code, defaults to `US`
+* `eufyApiBaseUrl` - cloud API base URL override, defaults to `https://home-api.eufylife.com`
+* `mqttPort` - MQTT TLS port, defaults to `8883`
+* `mqttUsername` and `mqttPassword` - MQTT credentials when required by the broker
+
+Example:
+
+```json
+{
+  "platform": "EufyRobovacHomebridgePlugin",
+  "name": "Eufy RoboVac",
+  "transport": "eufy-clean-cloud",
+  "deviceId": "your-eufy-clean-device-id",
+  "eufyEmail": "you@example.com",
+  "eufyPassword": "your-eufy-clean-password",
+  "country": "US",
+  "mqttHost": "mqtt.example.com",
+  "mqttPort": 8883,
+  "mqttClientId": "your-mqtt-client-id",
+  "mqttCommandTopic": "eufy/robovac/your-device-id/command",
+  "mqttStatusTopic": "eufy/robovac/your-device-id/status"
+}
+```
+
+The cloud/MQTT client accepts JSON status frames and protobuf-like status frames.  Status updates are normalized into the same internal RoboVac events used by the legacy Tuya path, so HomeKit and Matter accessories behave the same way in either mode.
+
+#### Shared Options
+
+`roomSwitches` works with both connection modes.  Each entry has:
+
+* `name` - the room name shown in HomeKit/Matter
+* `rooms` - a room number or comma-separated list of room numbers from the map in the Eufy Clean app
 
 ### HomeKit (HAP)
 
@@ -89,4 +170,3 @@ If you have `roomSwitches` configured, they are automatically mapped to Matter *
 2. Enable Matter in your Homebridge settings
 3. Run this plugin as a child bridge (recommended)
 4. The plugin will log `Matter is available and enabled.` on startup
-

@@ -118,9 +118,9 @@ describe('EufyRobovacMatterAccessory', () => {
       expect(accessory.clusters?.serviceArea?.selectedAreas).toEqual([0, 1]);
     });
 
-    it('should generate UUID from config ip + name', () => {
+    it('should generate UUID from config device id + name', () => {
       makeAccessory();
-      expect(api.matter.uuid.generate).toHaveBeenCalledWith(expect.stringContaining('10.0.1.69'));
+      expect(api.matter.uuid.generate).toHaveBeenCalledWith(expect.stringContaining('test-device-id'));
     });
 
     it('should set manufacturer to Eufy and model to RoboVac', () => {

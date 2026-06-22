@@ -3,6 +3,7 @@ import type { API, Logging, MatterRequests, PlatformConfig } from 'homebridge';
 import { MatterStatus } from 'homebridge';
 
 import { BaseMatterAccessory } from './BaseMatterAccessory.js';
+import type { RobovacClient } from '../robovac/index.js';
 import {
   mapEufyErrorToMatterErrorState,
   getEufyErrorDescription,
@@ -46,18 +47,15 @@ const CLEAN_SPEED_MAX = 3;
 // Identify type: 3 = AudibleBeep (plays a sound to locate the device)
 const IDENTIFY_TYPE_AUDIBLE_BEEP = 3;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RoboVac = any;
-
 export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
   private currentOperationalState: number;
   private selectedAreaIds: number[];
   private currentCleanSpeed: number;
   private currentErrorState: number;
   private readonly roomMap: Array<{ name: string; rooms: number[] }>;
-  private readonly robovac: RoboVac;
+  private readonly robovac: RobovacClient;
 
-  constructor(api: API, log: Logging, config: PlatformConfig, robovac: RoboVac) {
+  constructor(api: API, log: Logging, config: PlatformConfig, robovac: RobovacClient) {
     const serialNumber = config.deviceId as string;
     const roomSwitches: RoomSwitch[] = config.roomSwitches ?? [];
     const roomMap = roomSwitches.map((rs: RoomSwitch) => ({
@@ -69,7 +67,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     const allAreaIds = roomMap.map((_r, i) => i);
 
     super(api, log, {
-      UUID: api.matter!.uuid.generate(`${config.name}-${config.ip}`),
+      UUID: api.matter!.uuid.generate(`${config.name}-${config.deviceId}`),
       displayName: `${config.name}`,
       deviceType: api.matter!.deviceTypes.RoboticVacuumCleaner,
       serialNumber,
@@ -164,19 +162,19 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
               switch (newMode) {
               case CLEAN_SPEED_QUIET:
                 this.logDebug('setting clean speed to Quiet');
-                await this.robovac.setCleanSpeedQuiet();
+                await this.robovac.setCleanSpeedQuiet?.();
                 break;
               case CLEAN_SPEED_STANDARD:
                 this.logDebug('setting clean speed to Standard');
-                await this.robovac.setCleanSpeedStandard();
+                await this.robovac.setCleanSpeedStandard?.();
                 break;
               case CLEAN_SPEED_TURBO:
                 this.logDebug('setting clean speed to Turbo');
-                await this.robovac.setCleanSpeedTurbo();
+                await this.robovac.setCleanSpeedTurbo?.();
                 break;
               case CLEAN_SPEED_MAX:
                 this.logDebug('setting clean speed to Max');
-                await this.robovac.setCleanSpeedMax();
+                await this.robovac.setCleanSpeedMax?.();
                 break;
               default:
                 this.logWarn(`unknown clean speed mode: ${newMode}`);
@@ -579,7 +577,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     }
   }
 
-  static safeBatteryLevel(robovac: RoboVac): number {
+  static safeBatteryLevel(robovac: RobovacClient): number {
     try {
       return robovac.batteryLevel();
     } catch {
@@ -587,7 +585,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     }
   }
 
-  static safeDockedState(robovac: RoboVac): boolean {
+  static safeDockedState(robovac: RobovacClient): boolean {
     try {
       return robovac.docked();
     } catch {
@@ -595,7 +593,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     }
   }
 
-  static safeCleanSpeed(robovac: RoboVac): number {
+  static safeCleanSpeed(robovac: RobovacClient): number {
     try {
       const speedMap: { [key: string]: number } = {
         'Quiet': CLEAN_SPEED_QUIET,
@@ -605,7 +603,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       };
       // dps['102'] contains the clean speed value string
       const cleanSpeedValue = robovac.dps?.['102'];
-      if (cleanSpeedValue === undefined) {
+      if (typeof cleanSpeedValue !== 'string') {
         return CLEAN_SPEED_STANDARD;
       }
       const mappedSpeed = speedMap[cleanSpeedValue];
@@ -625,7 +623,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     return 0; // Ok
   }
 
-  static computeChargeState(robovac: RoboVac): number {
+  static computeChargeState(robovac: RobovacClient): number {
     try {
       const activity = robovac.activity();
       if (activity === 'Charging') {

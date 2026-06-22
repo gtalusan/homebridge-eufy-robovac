@@ -4,8 +4,24 @@
   "singular": true,
   "schema": {
     "type": "object",
-    "required": ["name", "ip", "deviceId", "deviceKey"],
+    "required": ["name", "deviceId"],
     "properties": {
+      "transport": {
+        "title": "Connection Type",
+        "description": "Use Legacy Tuya for older local-control RoboVacs. Use Eufy Clean Cloud for newer cloud/MQTT models.",
+        "type": "string",
+        "default": "legacy-tuya",
+        "oneOf": [
+          {
+            "title": "Legacy Tuya 3.3 local control",
+            "enum": ["legacy-tuya"]
+          },
+          {
+            "title": "Eufy Clean cloud/MQTT",
+            "enum": ["eufy-clean-cloud"]
+          }
+        ]
+      },
       "name": {
         "title": "Name",
         "description": "Arbitrary name for your Eufy Robovac",
@@ -14,7 +30,7 @@
       },
       "ip": {
         "title": "IP Address",
-        "description": "IP Address of your Eufy Robovac",
+        "description": "IP Address of your Eufy Robovac. Required for Legacy Tuya 3.3 local control.",
         "type": "string",
         "placeholder": "10.0.1.69"
       },
@@ -25,7 +41,70 @@
       },
       "deviceKey": {
         "title": "Tuya Device Key",
-        "description": "Tuya/Eufy Device/Local Key (see: https://github.com/gtalusan/eufy-device-id-js)",
+        "description": "Tuya/Eufy Device/Local Key. Required for Legacy Tuya 3.3 local control.",
+        "type": "string"
+      },
+      "eufyEmail": {
+        "title": "Eufy Clean Email",
+        "description": "Eufy Clean account email. Used only for Eufy Clean cloud/MQTT mode.",
+        "type": "string"
+      },
+      "eufyPassword": {
+        "title": "Eufy Clean Password",
+        "description": "Eufy Clean account password. Used only for Eufy Clean cloud/MQTT mode when no access token is supplied.",
+        "type": "string"
+      },
+      "eufyAccessToken": {
+        "title": "Eufy Clean Access Token",
+        "description": "Optional Eufy Clean API access token.",
+        "type": "string"
+      },
+      "country": {
+        "title": "Country",
+        "description": "Two-letter Eufy Clean account country code.",
+        "type": "string",
+        "default": "US"
+      },
+      "eufyApiBaseUrl": {
+        "title": "Eufy Clean API Base URL",
+        "description": "Override for the Eufy Clean cloud API base URL.",
+        "type": "string",
+        "default": "https://home-api.eufylife.com"
+      },
+      "mqttHost": {
+        "title": "MQTT Host",
+        "description": "Eufy Clean MQTT host. Required for cloud/MQTT mode unless discovered from the cloud API.",
+        "type": "string"
+      },
+      "mqttPort": {
+        "title": "MQTT Port",
+        "description": "Eufy Clean MQTT TLS port.",
+        "type": "integer",
+        "default": 8883
+      },
+      "mqttClientId": {
+        "title": "MQTT Client ID",
+        "description": "Eufy Clean MQTT client ID.",
+        "type": "string"
+      },
+      "mqttUsername": {
+        "title": "MQTT Username",
+        "description": "Optional Eufy Clean MQTT username.",
+        "type": "string"
+      },
+      "mqttPassword": {
+        "title": "MQTT Password",
+        "description": "Optional Eufy Clean MQTT password.",
+        "type": "string"
+      },
+      "mqttCommandTopic": {
+        "title": "MQTT Command Topic",
+        "description": "Topic used to send commands to the RoboVac.",
+        "type": "string"
+      },
+      "mqttStatusTopic": {
+        "title": "MQTT Status Topic",
+        "description": "Topic used to receive RoboVac status updates.",
         "type": "string"
       },
       "roomSwitches": {

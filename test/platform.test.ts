@@ -186,8 +186,8 @@ describe('EufyRobovacHomebridgePlatform', () => {
     it('should skip re-registration for existing cached accessory (idempotent)', async () => {
       const platform = new EufyRobovacHomebridgePlatform(log, config, api);
       // Pre-cache the UUIDs that would be generated for our config
-      const vacuumUUID = (api.matter.uuid.generate as ReturnType<typeof vi.fn>)(`${config.name}-${config.ip}`);
-      const findUUID = (api.matter.uuid.generate as ReturnType<typeof vi.fn>)(`find-${config.name}-${config.ip}`);
+      const vacuumUUID = (api.matter.uuid.generate as ReturnType<typeof vi.fn>)(`${config.name}-${config.deviceId}`);
+      const findUUID = (api.matter.uuid.generate as ReturnType<typeof vi.fn>)(`find-${config.name}-${config.deviceId}`);
       platform.configureMatterAccessory({ UUID: vacuumUUID, displayName: 'Test' } as MatterAccessory);
       platform.configureMatterAccessory({ UUID: findUUID, displayName: 'Find Test' } as MatterAccessory);
       await api._triggerDidFinishLaunching();
