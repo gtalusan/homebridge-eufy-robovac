@@ -51,6 +51,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private packetId = 1;
   private keepAlive?: NodeJS.Timeout;
   private readonly openudid: string;
+  private readonly discoveryNotes: string[] = [];
 
   constructor(private readonly config: EufyCleanConfig) {
     super();
@@ -78,7 +79,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
 
     if (!mqtt.host || !mqtt.clientId || !this.commandTopics(mqtt).length || !this.statusTopics(mqtt).length) {
       throw new Error(
-        'Eufy Clean cloud MQTT settings are incomplete. Configure Eufy Clean credentials or provide advanced MQTT overrides.',
+        `Eufy Clean cloud MQTT settings are incomplete. ${this.mqttDiagnostic(mqtt)}`,
       );
     }
 
@@ -213,8 +214,10 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       const data = await response.json() as Record<string, unknown>;
       const token = this.findString(data, ['access_token', 'token', 'auth_token']);
       if (token) {
+        this.discoveryNotes.push(`login:${loginConfig.category}:ok`);
         return token;
       }
+      this.discoveryNotes.push(`login:${loginConfig.category}:missing-token keys=${this.safeKeys(data).join(',')}`);
     }
 
     throw new Error('Eufy Clean login failed.');
@@ -229,6 +232,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     });
 
     if (!response.ok) {
+      this.discoveryNotes.push(`user-info:http-${response.status}`);
       return;
     }
 
@@ -238,10 +242,14 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     if (userCenterId) {
       this.gtoken = createHash('md5').update(userCenterId).digest('hex');
     }
+    this.discoveryNotes.push(
+      `user-info:token=${this.userCenterToken ? 'yes' : 'no'} gtoken=${this.gtoken ? 'yes' : 'no'} keys=${this.safeKeys(data).join(',')}`,
+    );
   }
 
   private async discoverDevice(): Promise<EufyCleanDevice | undefined> {
     if (!this.userCenterToken || !this.gtoken) {
+      this.discoveryNotes.push('device-list:skipped-missing-user-info');
       return undefined;
     }
 
@@ -253,6 +261,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     });
 
     if (!response.ok) {
+      this.discoveryNotes.push(`device-list:http-${response.status}`);
       return undefined;
     }
 
@@ -261,6 +270,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       .map(value => value && typeof value === 'object' ? value as Record<string, unknown> : undefined)
       .map(value => this.asRecord(value?.device) ?? value)
       .filter((value): value is Record<string, unknown> => !!value);
+    this.discoveryNotes.push(`device-list:count=${devices.length} keys=${this.safeKeys(data).join(',')}`);
 
     const device = this.selectDiscoveredDevice(devices);
 
@@ -270,6 +280,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
 
     const deviceId = this.findString(device, ['device_sn', 'id', 'device_id', 'deviceId']) ?? this.config.deviceId ?? '';
     const deviceModel = this.config.deviceModel ?? this.deviceModelFrom(device);
+    this.discoveryNotes.push(`device:selected id=${deviceId ? 'yes' : 'no'} model=${deviceModel ?? 'missing'} keys=${this.safeKeys(device).join(',')}`);
     const mqtt = this.mqttFromCredentials(mqttCredentials, deviceId, deviceModel);
 
     return {
@@ -321,11 +332,20 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     });
 
     if (!response.ok) {
+      this.discoveryNotes.push(`mqtt-info:http-${response.status}`);
       return undefined;
     }
 
     const data = await response.json() as Record<string, unknown>;
-    return this.asRecord(data.data) ?? data;
+    const credentials = this.asRecord(data.data)
+      ?? this.asRecord(this.getPath(data, 'data.mqtt'))
+      ?? this.asRecord(this.getPath(data, 'data.mqtt_info'))
+      ?? this.asRecord(this.getPath(data, 'data.user_mqtt_info'))
+      ?? this.asRecord(data.mqtt)
+      ?? this.asRecord(data.mqtt_info)
+      ?? data;
+    this.discoveryNotes.push(`mqtt-info:keys=${this.safeKeys(credentials).join(',')}`);
+    return credentials;
   }
 
   private mqttFromCredentials(credentials: Record<string, unknown> | undefined, deviceId: string, deviceModel?: string): EufyCleanDevice['mqtt'] {
@@ -333,13 +353,18 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       return undefined;
     }
 
-    const endpoint = this.findString(credentials, ['endpoint_addr']);
+    const endpoint = this.findString(credentials, ['endpoint_addr', 'endpointAddr', 'endpoint', 'host', 'mqtt_host']);
     const parsedEndpoint = endpoint ? this.parseMqttEndpoint(endpoint) : undefined;
     const appName = this.findString(credentials, ['app_name']) ?? 'eufy_home';
     const userId = this.findString(credentials, ['user_id']) ?? this.mqttUserId;
-    const thingName = this.findString(credentials, ['thing_name']);
+    const thingName = this.findString(credentials, ['thing_name', 'thingName', 'username', 'mqtt_username']);
 
     if (!parsedEndpoint || !userId || !thingName || !deviceModel) {
+      const status = `endpoint=${parsedEndpoint ? 'yes' : 'no'} userId=${userId ? 'yes' : 'no'} `
+        + `thing=${thingName ? 'yes' : 'no'} model=${deviceModel ? 'yes' : 'no'}`;
+      this.discoveryNotes.push(
+        `mqtt-build:${status}`,
+      );
       return undefined;
     }
 
@@ -353,8 +378,8 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       port: parsedEndpoint.port,
       clientId,
       username: thingName,
-      certificatePem: this.findString(credentials, ['certificate_pem']),
-      privateKey: this.findString(credentials, ['private_key']),
+      certificatePem: this.findString(credentials, ['certificate_pem', 'certificatePem', 'cert', 'client_cert']),
+      privateKey: this.findString(credentials, ['private_key', 'privateKey', 'key', 'client_key']),
       commandTopic: commandTopics[0],
       commandTopics,
       statusTopic: statusTopics[0],
@@ -553,6 +578,16 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     return this.config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
   }
 
+  private mqttDiagnostic(mqtt: EufyCleanDevice['mqtt']): string {
+    const missing = [
+      !mqtt?.host ? 'host' : undefined,
+      !mqtt?.clientId ? 'clientId' : undefined,
+      !this.commandTopics(mqtt).length ? 'commandTopics' : undefined,
+      !this.statusTopics(mqtt).length ? 'statusTopics' : undefined,
+    ].filter((value): value is string => !!value);
+    return `Missing: ${missing.join(', ')}. Discovery: ${this.discoveryNotes.join(' | ') || 'none'}`;
+  }
+
   private aiotApiBaseUrl(): string {
     return this.config.aiotApiBaseUrl ?? DEFAULT_AIOT_API_BASE_URL;
   }
@@ -675,6 +710,9 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       if (typeof value === 'string' && value.length > 0) {
         return value;
       }
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return String(value);
+      }
     }
     return undefined;
   }
@@ -704,6 +742,13 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       return value as Record<string, unknown>;
     }
     return undefined;
+  }
+
+  private safeKeys(value: Record<string, unknown> | undefined): string[] {
+    if (!value) {
+      return [];
+    }
+    return Object.keys(value).sort().slice(0, 12);
   }
 
   private getPath(source: Record<string, unknown>, path: string): unknown {
