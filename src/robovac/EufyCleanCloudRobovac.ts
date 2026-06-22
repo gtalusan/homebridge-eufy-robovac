@@ -532,7 +532,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
         resolve();
       });
     });
-    this.socket?.write(this.packet(8, Buffer.concat([variableHeader, payload])));
+    this.socket?.write(this.packet(8, Buffer.concat([variableHeader, payload]), 0x02));
     await suback;
   }
 
