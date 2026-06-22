@@ -82,6 +82,8 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private keepAlive?: NodeJS.Timeout;
   private readonly openudid: string;
   private readonly discoveryNotes: string[] = [];
+  private readonly pendingPubacks = new Map<number, () => void>();
+  private readonly pendingSubacks = new Map<number, (returnCode: number) => void>();
   private cloudApiMode: CloudApiMode = 'novel';
 
   constructor(private readonly config: EufyCleanConfig) {
@@ -145,32 +147,26 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
 
   async clean(): Promise<void> {
     await this.sendCommand('clean');
-    this.setState({ activity: 'Cleaning' });
   }
 
   async pause(): Promise<void> {
     await this.sendCommand('pause');
-    this.setState({ activity: 'Paused' });
   }
 
   async resume(): Promise<void> {
     await this.sendCommand('resume');
-    this.setState({ activity: 'Cleaning' });
   }
 
   async goHome(enabled = true): Promise<void> {
     await this.sendCommand('goHome', { enabled });
-    this.setState({ activity: 'Recharge', goHome: enabled });
   }
 
   async cleanRooms(rooms: number[]): Promise<void> {
     await this.sendCommand('cleanRooms', { rooms });
-    this.setState({ activity: 'Cleaning' });
   }
 
   async locate(enabled: boolean): Promise<void> {
     await this.sendCommand('locate', { enabled });
-    this.setState({ locate: enabled });
   }
 
   async setCleanSpeedQuiet(): Promise<void> {
@@ -518,9 +514,26 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
 
   private async subscribe(topic: string, qos: 0 | 1): Promise<void> {
     const topicBuffer = Buffer.from(topic);
-    const variableHeader = Buffer.from([this.packetId >> 8, this.packetId++ & 0xff]);
+    const packetId = this.nextPacketId();
+    const variableHeader = Buffer.from([packetId >> 8, packetId & 0xff]);
     const payload = Buffer.concat([this.stringField(topicBuffer), Buffer.from([qos])]);
+    const suback = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingSubacks.delete(packetId);
+        reject(new Error(`Timed out subscribing to Eufy Clean MQTT topic ${topic}.`));
+      }, 10000);
+      this.pendingSubacks.set(packetId, returnCode => {
+        clearTimeout(timeout);
+        if (returnCode === 0x80) {
+          reject(new Error(`Eufy Clean MQTT subscription rejected for ${topic}.`));
+          return;
+        }
+        this.emit('debug', `Subscribed to Eufy Clean MQTT topic ${topic} with QoS ${returnCode}`);
+        resolve();
+      });
+    });
     this.socket?.write(this.packet(8, Buffer.concat([variableHeader, payload])));
+    await suback;
   }
 
   private async sendCommand(command: CloudCommand, payload: Record<string, unknown> = {}): Promise<void> {
@@ -538,15 +551,15 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       'debug',
       `Publishing Eufy Clean ${command} command using ${this.cloudApiMode} DPS keys: ${Object.keys(dataPayload).join(', ')}`,
     );
+    const qos = this.config.mqtt?.qos ?? 0;
     for (const topic of topics) {
       this.emit('debug', `Publishing Eufy Clean MQTT command to ${topic}`);
-      this.socket.write(this.publishPacket(topic, encoded));
+      await this.publish(topic, encoded, qos);
     }
   }
 
   private async setCleanSpeed(speed: string): Promise<void> {
     await this.sendCommand('cleanSpeed', { speed });
-    this.setState({ cleanSpeed: speed, 102: speed });
   }
 
   private handleMqttData(data: Buffer, connackResolve: () => void): void {
@@ -565,18 +578,35 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       const packet = this.mqttBuffer.subarray(0, packetLength);
       this.mqttBuffer = this.mqttBuffer.subarray(packetLength);
       const type = packet[0] >> 4;
+      const flags = packet[0] & 0x0f;
       const body = packet.subarray(1 + remaining.bytes);
 
       if (type === 2) {
         if (body[1] === 0) {
+          this.emit('debug', 'Eufy Clean MQTT CONNACK accepted');
           connackResolve();
         } else {
           this.emit('error', `Eufy Clean MQTT connection refused: ${body[1]}`);
         }
       } else if (type === 3) {
-        const publish = this.parsePublish(body);
+        const publish = this.parsePublish(body, flags);
         if (publish) {
           this.handlePublish(publish);
+        }
+      } else if (type === 4 && body.length >= 2) {
+        const packetId = body.readUInt16BE(0);
+        const resolve = this.pendingPubacks.get(packetId);
+        if (resolve) {
+          this.pendingPubacks.delete(packetId);
+          this.emit('debug', `Eufy Clean MQTT PUBACK received for packet ${packetId}`);
+          resolve();
+        }
+      } else if (type === 9 && body.length >= 3) {
+        const packetId = body.readUInt16BE(0);
+        const resolve = this.pendingSubacks.get(packetId);
+        if (resolve) {
+          this.pendingSubacks.delete(packetId);
+          resolve(body[2]);
         }
       }
     }
@@ -613,11 +643,36 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     return this.packet(1, Buffer.concat([variableHeader, ...fields]));
   }
 
-  private publishPacket(topic: string, payload: Buffer): Buffer {
-    return this.packet(3, Buffer.concat([this.stringField(Buffer.from(topic)), payload]));
+  private async publish(topic: string, payload: Buffer, qos: 0 | 1): Promise<void> {
+    if (qos === 0) {
+      this.socket?.write(this.publishPacket(topic, payload));
+      return;
+    }
+
+    const packetId = this.nextPacketId();
+    const publishAck = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingPubacks.delete(packetId);
+        reject(new Error(`Timed out publishing Eufy Clean MQTT command to ${topic}.`));
+      }, 10000);
+      this.pendingPubacks.set(packetId, () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+    this.socket?.write(this.publishPacket(topic, payload, qos, packetId));
+    await publishAck;
   }
 
-  private parsePublish(body: Buffer): MqttPublish | undefined {
+  private publishPacket(topic: string, payload: Buffer, qos: 0 | 1 = 0, packetId?: number): Buffer {
+    const topicField = this.stringField(Buffer.from(topic));
+    const variableHeader = qos === 1 && packetId
+      ? Buffer.concat([topicField, Buffer.from([packetId >> 8, packetId & 0xff])])
+      : topicField;
+    return this.packet(3, Buffer.concat([variableHeader, payload]), qos << 1);
+  }
+
+  private parsePublish(body: Buffer, flags: number): MqttPublish | undefined {
     if (body.length < 2) {
       return undefined;
     }
@@ -626,14 +681,29 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     if (body.length < topicEnd) {
       return undefined;
     }
+    const qos = (flags >> 1) & 0x03;
+    const payloadStart = qos > 0 ? topicEnd + 2 : topicEnd;
+    if (qos > 0) {
+      if (body.length < payloadStart) {
+        return undefined;
+      }
+      const packetId = body.readUInt16BE(topicEnd);
+      this.socket?.write(this.packet(4, Buffer.from([packetId >> 8, packetId & 0xff])));
+    }
     return {
       topic: body.subarray(2, topicEnd).toString('utf8'),
-      payload: body.subarray(topicEnd),
+      payload: body.subarray(payloadStart),
     };
   }
 
-  private packet(type: number, body = Buffer.alloc(0)): Buffer {
-    return Buffer.concat([Buffer.from([type << 4]), this.encodeRemainingLength(body.length), body]);
+  private packet(type: number, body = Buffer.alloc(0), flags = 0): Buffer {
+    return Buffer.concat([Buffer.from([(type << 4) | flags]), this.encodeRemainingLength(body.length), body]);
+  }
+
+  private nextPacketId(): number {
+    const packetId = this.packetId;
+    this.packetId = this.packetId >= 0xffff ? 1 : this.packetId + 1;
+    return packetId;
   }
 
   private stringField(value: Buffer): Buffer {
