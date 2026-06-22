@@ -93,6 +93,7 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
           this.log.info(error);
         });
         await this.robovac.initialize();
+        this.config.deviceId = this.robovac.deviceId ?? this.config.deviceId;
       } catch (error: unknown) {
         this.log.error(error as string);
         return;
@@ -170,7 +171,7 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
 
   parseConfig(): boolean {
     const required = resolveTransport(this.config) === 'eufy-clean-cloud'
-      ? ['name', 'deviceId', 'eufyEmail', 'eufyPassword']
+      ? ['name', 'eufyEmail', 'eufyPassword']
       : ['name', 'ip', 'deviceId', 'deviceKey'];
 
     for (const key of required) {

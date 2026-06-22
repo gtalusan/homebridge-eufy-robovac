@@ -73,11 +73,11 @@ Required fields:
 
 * `name` - the name for your RoboVac
 * `transport` - `eufy-clean-cloud`
-* `deviceId` - the Eufy Clean device ID
 * `eufyEmail` and `eufyPassword` - Eufy Clean account credentials
 
 Optional fields:
 
+* `deviceId` - Eufy Clean device ID. Leave this blank if your account has a single RoboVac; the plugin will discover it automatically.
 * `eufyAccessToken` - existing Eufy Clean access token
 * `country` - two-letter account country code, defaults to `US`
 * `eufyApiBaseUrl` - cloud API base URL override, defaults to `https://home-api.eufylife.com`
@@ -96,12 +96,13 @@ Example:
   "platform": "EufyRobovacHomebridgePlugin",
   "name": "Eufy RoboVac",
   "transport": "eufy-clean-cloud",
-  "deviceId": "your-eufy-clean-device-id",
   "eufyEmail": "you@example.com",
   "eufyPassword": "your-eufy-clean-password",
   "country": "US"
 }
 ```
+
+If the Eufy Clean account has multiple devices, startup will log the discovered device names and IDs.  Add the desired `deviceId` to select a specific RoboVac.
 
 The cloud/MQTT client accepts JSON status frames and protobuf-like status frames.  Status updates are normalized into the same internal RoboVac events used by the legacy Tuya path, so HomeKit and Matter accessories behave the same way in either mode.
 

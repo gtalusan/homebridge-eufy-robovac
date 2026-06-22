@@ -7,6 +7,7 @@ export interface RobovacEvent {
 
 export interface RobovacClient extends EventEmitter {
   connected: boolean;
+  deviceId?: string;
   dps?: Record<string, unknown>;
 
   initialize(): Promise<void>;

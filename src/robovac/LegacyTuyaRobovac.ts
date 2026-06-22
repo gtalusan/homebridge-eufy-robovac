@@ -12,9 +12,11 @@ export interface LegacyTuyaRobovacConfig {
 }
 
 export function createLegacyTuyaRobovac(config: LegacyTuyaRobovacConfig): RobovacClient {
-  return new RoboVac({
+  const robovac = new RoboVac({
     ip: config.ip,
     deviceId: config.deviceId,
     localKey: config.deviceKey,
   }) as RobovacClient;
+  robovac.deviceId = config.deviceId;
+  return robovac;
 }

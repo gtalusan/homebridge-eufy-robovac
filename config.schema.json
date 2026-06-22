@@ -41,9 +41,8 @@
       },
       "deviceId": {
         "title": "Device ID",
-        "description": "Tuya/Eufy Device ID for legacy mode, or Eufy Clean Device ID for cloud/MQTT mode.",
-        "type": "string",
-        "required": true
+        "description": "Required for legacy mode. Optional for cloud/MQTT mode when the Eufy Clean account has a single RoboVac; otherwise use the startup log to choose one.",
+        "type": "string"
       },
       "deviceModel": {
         "title": "Eufy Clean Device Model",

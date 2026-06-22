@@ -38,6 +38,7 @@ const USER_AGENT = 'EufyHome-Android-3.1.3-753';
 
 export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient {
   public connected = false;
+  public deviceId?: string;
   public dps: Record<string, unknown> = {};
 
   private socket?: TLSSocket;
@@ -72,6 +73,8 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     };
     this.config.mqtt = mqtt;
     this.config.deviceModel = this.config.deviceModel ?? discoveredDevice?.model;
+    this.config.deviceId = this.config.deviceId ?? discoveredDevice?.id;
+    this.deviceId = this.config.deviceId;
 
     if (!mqtt.host || !mqtt.clientId || !this.commandTopics(mqtt).length || !this.statusTopics(mqtt).length) {
       throw new Error(
@@ -79,9 +82,8 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       );
     }
 
-    this.config.deviceId = this.config.deviceId ?? discoveredDevice?.id;
     if (!this.config.deviceId) {
-      throw new Error('Eufy Clean cloud deviceId is required.');
+      throw new Error('Eufy Clean cloud could not discover a RoboVac device.');
     }
 
     await this.openMqtt(mqtt.host, mqtt.port ?? DEFAULT_MQTT_PORT, mqtt.clientId, mqtt.username, mqtt.password, mqtt.certificatePem, mqtt.privateKey);
@@ -255,18 +257,19 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     }
 
     const data = await response.json() as Record<string, unknown>;
-    const devices = this.findArray(data, ['data.devices', 'devices', 'list', 'vacs']);
-    const device = devices
+    const devices = this.findArray(data, ['data.devices', 'devices', 'list', 'vacs'])
       .map(value => value && typeof value === 'object' ? value as Record<string, unknown> : undefined)
       .map(value => this.asRecord(value?.device) ?? value)
-      .find(value => value && (!this.config.deviceId || this.findString(value, ['device_sn', 'id', 'device_id', 'deviceId']) === this.config.deviceId));
+      .filter((value): value is Record<string, unknown> => !!value);
+
+    const device = this.selectDiscoveredDevice(devices);
 
     if (!device) {
       return undefined;
     }
 
     const deviceId = this.findString(device, ['device_sn', 'id', 'device_id', 'deviceId']) ?? this.config.deviceId ?? '';
-    const deviceModel = this.config.deviceModel ?? this.findString(device, ['device_model', 'deviceModel', 'model']);
+    const deviceModel = this.config.deviceModel ?? this.deviceModelFrom(device);
     const mqtt = this.mqttFromCredentials(mqttCredentials, deviceId, deviceModel);
 
     return {
@@ -278,6 +281,37 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
         port: this.findNumber(device, ['mqtt_port', 'mqttPort', 'mqtt.port']) ?? mqtt?.port,
       },
     };
+  }
+
+  private deviceModelFrom(device: Record<string, unknown>): string | undefined {
+    const model = this.findString(device, ['product.product_code', 'device_model', 'deviceModel', 'model']);
+    return model ? model.substring(0, 5) : undefined;
+  }
+
+  private selectDiscoveredDevice(devices: Record<string, unknown>[]): Record<string, unknown> | undefined {
+    if (this.config.deviceId) {
+      return devices.find(value => this.findString(value, ['device_sn', 'id', 'device_id', 'deviceId']) === this.config.deviceId);
+    }
+
+    if (devices.length === 1) {
+      const selected = devices[0];
+      const selectedId = this.findString(selected, ['device_sn', 'id', 'device_id', 'deviceId']);
+      this.emit('event', { command: 'deviceId', value: selectedId ?? null });
+      return selected;
+    }
+
+    if (devices.length > 1) {
+      const choices = devices
+        .map(device => {
+          const id = this.findString(device, ['device_sn', 'id', 'device_id', 'deviceId']) ?? 'unknown-id';
+          const name = this.findString(device, ['alias_name', 'device_name', 'name']) ?? 'Unnamed RoboVac';
+          return `${name} (${id})`;
+        })
+        .join(', ');
+      throw new Error(`Multiple Eufy Clean devices found. Set deviceId to one of: ${choices}`);
+    }
+
+    return undefined;
   }
 
   private async getMqttCredentials(): Promise<Record<string, unknown> | undefined> {
