@@ -121,8 +121,23 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     }
 
     await this.openMqtt(mqtt.host, mqtt.port ?? DEFAULT_MQTT_PORT, mqtt.clientId, mqtt.username, mqtt.password, mqtt.certificatePem, mqtt.privateKey);
+    const subscribedTopics: string[] = [];
+    const rejectedTopics: string[] = [];
     for (const topic of this.statusTopics(mqtt)) {
-      await this.subscribe(topic, mqtt.qos ?? 0);
+      try {
+        await this.subscribe(topic, mqtt.qos ?? 0);
+        subscribedTopics.push(topic);
+      } catch (error) {
+        rejectedTopics.push(topic);
+        const message = error instanceof Error ? error.message : String(error);
+        this.emit('debug', message);
+      }
+    }
+    if (!subscribedTopics.length) {
+      throw new Error(`Eufy Clean MQTT subscriptions were rejected for all status topics: ${rejectedTopics.join(', ')}`);
+    }
+    if (rejectedTopics.length) {
+      this.emit('debug', `Eufy Clean MQTT will continue with subscribed status topics: ${subscribedTopics.join(', ')}`);
     }
     this.connected = true;
     this.emit('tuya.connected');
