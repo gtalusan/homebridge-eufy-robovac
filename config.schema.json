@@ -5,6 +5,42 @@
   "schema": {
     "type": "object",
     "required": ["name", "deviceId"],
+    "allOf": [
+      {
+        "if": {
+          "anyOf": [
+            {
+              "properties": {
+                "transport": {
+                  "const": "legacy-tuya"
+                }
+              }
+            },
+            {
+              "not": {
+                "required": ["transport"]
+              }
+            }
+          ]
+        },
+        "then": {
+          "required": ["ip", "deviceKey"]
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "transport": {
+              "const": "eufy-clean-cloud"
+            }
+          },
+          "required": ["transport"]
+        },
+        "then": {
+          "required": ["eufyEmail", "eufyPassword"]
+        }
+      }
+    ],
     "properties": {
       "transport": {
         "title": "Connection Type",
@@ -32,80 +68,172 @@
         "title": "IP Address",
         "description": "IP Address of your Eufy Robovac. Required for Legacy Tuya 3.3 local control.",
         "type": "string",
-        "placeholder": "10.0.1.69"
+        "placeholder": "10.0.1.69",
+        "condition": {
+          "functionBody": "return !model.transport || model.transport === 'legacy-tuya';"
+        }
       },
       "deviceId": {
-        "title": "Tuya Device ID",
-        "description": "Tuya/Eufy Device ID (see: https://github.com/gtalusan/eufy-device-id-js)",
+        "title": "Device ID",
+        "description": "Tuya/Eufy Device ID for legacy mode, or Eufy Clean Device ID for cloud/MQTT mode.",
         "type": "string"
+      },
+      "deviceModel": {
+        "title": "Eufy Clean Device Model",
+        "description": "Optional model code override for cloud/MQTT mode. The plugin normally discovers this from Eufy Clean.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud';"
+        }
       },
       "deviceKey": {
         "title": "Tuya Device Key",
         "description": "Tuya/Eufy Device/Local Key. Required for Legacy Tuya 3.3 local control.",
-        "type": "string"
+        "type": "string",
+        "condition": {
+          "functionBody": "return !model.transport || model.transport === 'legacy-tuya';"
+        }
       },
       "eufyEmail": {
         "title": "Eufy Clean Email",
         "description": "Eufy Clean account email. Used only for Eufy Clean cloud/MQTT mode.",
-        "type": "string"
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud';"
+        }
       },
       "eufyPassword": {
         "title": "Eufy Clean Password",
         "description": "Eufy Clean account password. Used only for Eufy Clean cloud/MQTT mode when no access token is supplied.",
-        "type": "string"
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud';"
+        }
       },
       "eufyAccessToken": {
         "title": "Eufy Clean Access Token",
-        "description": "Optional Eufy Clean API access token.",
-        "type": "string"
+        "description": "Optional Eufy Clean API access token. Username and password are still recommended so MQTT credentials can be discovered.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud';"
+        }
       },
       "country": {
         "title": "Country",
         "description": "Two-letter Eufy Clean account country code.",
         "type": "string",
-        "default": "US"
+        "default": "US",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud';"
+        }
       },
       "eufyApiBaseUrl": {
         "title": "Eufy Clean API Base URL",
         "description": "Override for the Eufy Clean cloud API base URL.",
         "type": "string",
-        "default": "https://home-api.eufylife.com"
+        "default": "https://home-api.eufylife.com",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud';"
+        }
+      },
+      "eufyAiotApiBaseUrl": {
+        "title": "Eufy Clean AIOT API Base URL",
+        "description": "Advanced override for the Eufy Clean AIOT API used to discover MQTT credentials.",
+        "type": "string",
+        "default": "https://aiot-clean-api-pr.eufylife.com",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud';"
+        }
+      },
+      "openudid": {
+        "title": "OpenUDID",
+        "description": "Advanced override for the Android-style Eufy Clean client identifier. The plugin generates one automatically.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud';"
+        }
+      },
+      "showAdvancedMqtt": {
+        "title": "Show Advanced MQTT Overrides",
+        "description": "Enable only if you need to manually override MQTT settings. The plugin normally discovers these from Eufy Clean.",
+        "type": "boolean",
+        "default": false,
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud';"
+        }
       },
       "mqttHost": {
         "title": "MQTT Host",
-        "description": "Eufy Clean MQTT host. Required for cloud/MQTT mode unless discovered from the cloud API.",
-        "type": "string"
+        "description": "Advanced override. Normally discovered from the Eufy Clean API.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud' && model.showAdvancedMqtt;"
+        }
       },
       "mqttPort": {
         "title": "MQTT Port",
         "description": "Eufy Clean MQTT TLS port.",
         "type": "integer",
-        "default": 8883
+        "default": 8883,
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud' && model.showAdvancedMqtt;"
+        }
       },
       "mqttClientId": {
         "title": "MQTT Client ID",
-        "description": "Eufy Clean MQTT client ID.",
-        "type": "string"
+        "description": "Advanced override. Normally generated from Eufy Clean MQTT credentials.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud' && model.showAdvancedMqtt;"
+        }
       },
       "mqttUsername": {
         "title": "MQTT Username",
-        "description": "Optional Eufy Clean MQTT username.",
-        "type": "string"
+        "description": "Advanced override. Normally discovered from the Eufy Clean API.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud' && model.showAdvancedMqtt;"
+        }
       },
       "mqttPassword": {
         "title": "MQTT Password",
-        "description": "Optional Eufy Clean MQTT password.",
-        "type": "string"
+        "description": "Advanced override for brokers that use password authentication.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud' && model.showAdvancedMqtt;"
+        }
+      },
+      "mqttCertificatePem": {
+        "title": "MQTT Certificate PEM",
+        "description": "Advanced override. Normally discovered from the Eufy Clean API.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud' && model.showAdvancedMqtt;"
+        }
+      },
+      "mqttPrivateKey": {
+        "title": "MQTT Private Key PEM",
+        "description": "Advanced override. Normally discovered from the Eufy Clean API.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud' && model.showAdvancedMqtt;"
+        }
       },
       "mqttCommandTopic": {
         "title": "MQTT Command Topic",
-        "description": "Topic used to send commands to the RoboVac.",
-        "type": "string"
+        "description": "Advanced override. Normally derived as cmd/eufy_home/{model}/{deviceId}/req and smart/mb/out/{deviceId}.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud' && model.showAdvancedMqtt;"
+        }
       },
       "mqttStatusTopic": {
         "title": "MQTT Status Topic",
-        "description": "Topic used to receive RoboVac status updates.",
-        "type": "string"
+        "description": "Advanced override. Normally derived as cmd/eufy_home/{model}/{deviceId}/res and smart/mb/in/{deviceId}.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud' && model.showAdvancedMqtt;"
+        }
       },
       "roomSwitches": {
         "description": "Rooms - configure according to the eufy clean app.  These are optional.  If no rooms, then the Eufy Robovac will be configured for Auto mode.",

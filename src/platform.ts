@@ -170,7 +170,7 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
 
   parseConfig(): boolean {
     const required = resolveTransport(this.config) === 'eufy-clean-cloud'
-      ? ['name', 'deviceId']
+      ? ['name', 'deviceId', 'eufyEmail', 'eufyPassword']
       : ['name', 'ip', 'deviceId', 'deviceKey'];
 
     for (const key of required) {

@@ -36,6 +36,8 @@ The plugin supports two connection modes:
 
 Existing configurations continue to use Legacy Tuya mode by default.  To opt in to the newer cloud/MQTT API, set `transport` to `eufy-clean-cloud`.
 
+Homebridge Config UI will show the relevant fields for the selected connection type and validate the required settings for that mode.
+
 #### Legacy Tuya 3.3 Local Control
 
 Use this mode for older RoboVacs that still support local Tuya 3.3 control.
@@ -72,19 +74,20 @@ Required fields:
 * `name` - the name for your RoboVac
 * `transport` - `eufy-clean-cloud`
 * `deviceId` - the Eufy Clean device ID
-* `mqttHost` - MQTT broker host
-* `mqttClientId` - MQTT client ID
-* `mqttCommandTopic` - topic used to send commands to the RoboVac
-* `mqttStatusTopic` - topic used to receive status updates from the RoboVac
+* `eufyEmail` and `eufyPassword` - Eufy Clean account credentials
 
 Optional fields:
 
-* `eufyEmail` and `eufyPassword` - Eufy Clean account credentials, used to request an access token when one is not supplied
 * `eufyAccessToken` - existing Eufy Clean access token
 * `country` - two-letter account country code, defaults to `US`
 * `eufyApiBaseUrl` - cloud API base URL override, defaults to `https://home-api.eufylife.com`
-* `mqttPort` - MQTT TLS port, defaults to `8883`
-* `mqttUsername` and `mqttPassword` - MQTT credentials when required by the broker
+* `deviceModel` - optional model code override when Eufy Clean discovery cannot identify the model
+* `showAdvancedMqtt` - reveals manual MQTT overrides. Most users should leave this disabled.
+
+The plugin discovers MQTT credentials from Eufy's AIOT API and derives MQTT topics automatically:
+
+* command topics: `cmd/eufy_home/{deviceModel}/{deviceId}/req` and `smart/mb/out/{deviceId}`
+* status topics: `cmd/eufy_home/{deviceModel}/{deviceId}/res` and `smart/mb/in/{deviceId}`
 
 Example:
 
@@ -96,12 +99,7 @@ Example:
   "deviceId": "your-eufy-clean-device-id",
   "eufyEmail": "you@example.com",
   "eufyPassword": "your-eufy-clean-password",
-  "country": "US",
-  "mqttHost": "mqtt.example.com",
-  "mqttPort": 8883,
-  "mqttClientId": "your-mqtt-client-id",
-  "mqttCommandTopic": "eufy/robovac/your-device-id/command",
-  "mqttStatusTopic": "eufy/robovac/your-device-id/status"
+  "country": "US"
 }
 ```
 

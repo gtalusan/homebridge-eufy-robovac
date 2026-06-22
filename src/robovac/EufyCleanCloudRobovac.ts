@@ -1,5 +1,6 @@
 import type { EufyCleanConfig, RobovacClient } from './types.js';
 
+import { randomBytes, createHash } from 'crypto';
 import { EventEmitter } from 'events';
 import { connect as tlsConnect, type TLSSocket } from 'tls';
 
@@ -7,14 +8,19 @@ import { EufyCleanCodec, type CloudCommand } from './EufyCleanCodec.js';
 
 interface EufyCleanDevice {
   id: string;
+  model?: string;
   mqtt?: {
     host?: string;
     port?: number;
     clientId?: string;
     username?: string;
     password?: string;
+    certificatePem?: string;
+    privateKey?: string;
     commandTopic?: string;
+    commandTopics?: string[];
     statusTopic?: string;
+    statusTopics?: string[];
     qos?: 0 | 1;
   };
 }
@@ -25,7 +31,10 @@ interface MqttPublish {
 }
 
 const DEFAULT_API_BASE_URL = 'https://home-api.eufylife.com';
+const DEFAULT_EUFY_API_BASE_URL = 'https://api.eufylife.com';
+const DEFAULT_AIOT_API_BASE_URL = 'https://aiot-clean-api-pr.eufylife.com';
 const DEFAULT_MQTT_PORT = 8883;
+const USER_AGENT = 'EufyHome-Android-3.1.3-753';
 
 export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient {
   public connected = false;
@@ -34,18 +43,26 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private socket?: TLSSocket;
   private readonly codec = new EufyCleanCodec();
   private accessToken?: string;
+  private userCenterToken?: string;
+  private gtoken?: string;
+  private mqttUserId?: string;
   private mqttBuffer = Buffer.alloc(0);
   private packetId = 1;
   private keepAlive?: NodeJS.Timeout;
+  private readonly openudid: string;
 
   constructor(private readonly config: EufyCleanConfig) {
     super();
     this.accessToken = config.accessToken;
+    this.openudid = config.openudid ?? randomBytes(16).toString('hex');
   }
 
   async initialize(): Promise<void> {
     if (!this.accessToken && this.config.email && this.config.password) {
       this.accessToken = await this.login();
+    }
+    if (!this.userCenterToken && this.accessToken) {
+      await this.loadUserInfo();
     }
 
     const discoveredDevice = await this.discoverDevice();
@@ -53,9 +70,13 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       ...discoveredDevice?.mqtt,
       ...this.config.mqtt,
     };
+    this.config.mqtt = mqtt;
+    this.config.deviceModel = this.config.deviceModel ?? discoveredDevice?.model;
 
-    if (!mqtt.host || !mqtt.clientId || !mqtt.commandTopic || !mqtt.statusTopic) {
-      throw new Error('Eufy Clean cloud MQTT settings are incomplete. Configure mqtt.host, mqtt.clientId, mqtt.commandTopic, and mqtt.statusTopic.');
+    if (!mqtt.host || !mqtt.clientId || !this.commandTopics(mqtt).length || !this.statusTopics(mqtt).length) {
+      throw new Error(
+        'Eufy Clean cloud MQTT settings are incomplete. Configure Eufy Clean credentials or provide advanced MQTT overrides.',
+      );
     }
 
     this.config.deviceId = this.config.deviceId ?? discoveredDevice?.id;
@@ -63,8 +84,10 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       throw new Error('Eufy Clean cloud deviceId is required.');
     }
 
-    await this.openMqtt(mqtt.host, mqtt.port ?? DEFAULT_MQTT_PORT, mqtt.clientId, mqtt.username, mqtt.password);
-    await this.subscribe(mqtt.statusTopic, mqtt.qos ?? 0);
+    await this.openMqtt(mqtt.host, mqtt.port ?? DEFAULT_MQTT_PORT, mqtt.clientId, mqtt.username, mqtt.password, mqtt.certificatePem, mqtt.privateKey);
+    for (const topic of this.statusTopics(mqtt)) {
+      await this.subscribe(topic, mqtt.qos ?? 0);
+    }
     this.connected = true;
     this.emit('tuya.connected');
     this.emit('cloud.connected');
@@ -154,40 +177,77 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   }
 
   private async login(): Promise<string> {
-    const response = await fetch(`${this.apiBaseUrl()}/v1/user/email/login`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        country: this.config.country ?? 'US',
+    const configs = [
+      {
+        url: `${this.apiBaseUrl()}/v1/user/v2/email/login`,
+        clientId: 'eufy-app',
+        clientSecret: '8FHf22gaTKu7MZXqz5zytw',
+        category: 'Health',
       },
-      body: JSON.stringify({
-        email: this.config.email,
-        password: this.config.password,
-      }),
+      {
+        url: `${this.apiBaseUrl()}/v1/user/email/login`,
+        clientId: 'eufyhome-app',
+        clientSecret: 'GQCpr9dSp3uQpsOMgJ4xQ',
+        category: 'Home',
+      },
+    ];
+
+    for (const loginConfig of configs) {
+      const response = await fetch(loginConfig.url, {
+        method: 'POST',
+        headers: this.eufyHeaders(loginConfig.category),
+        body: JSON.stringify({
+          email: this.config.email,
+          password: this.config.password,
+          client_id: loginConfig.clientId,
+          client_secret: loginConfig.clientSecret,
+        }),
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const data = await response.json() as Record<string, unknown>;
+      const token = this.findString(data, ['access_token', 'token', 'auth_token']);
+      if (token) {
+        return token;
+      }
+    }
+
+    throw new Error('Eufy Clean login failed.');
+  }
+
+  private async loadUserInfo(): Promise<void> {
+    const response = await fetch(`${DEFAULT_EUFY_API_BASE_URL}/v1/user/user_center_info`, {
+      headers: {
+        ...this.eufyHeaders('Home'),
+        token: this.accessToken ?? '',
+      },
     });
 
     if (!response.ok) {
-      throw new Error(`Eufy Clean login failed with HTTP ${response.status}`);
+      return;
     }
 
     const data = await response.json() as Record<string, unknown>;
-    const token = this.findString(data, ['access_token', 'token', 'auth_token']);
-    if (!token) {
-      throw new Error('Eufy Clean login response did not include an access token.');
+    this.userCenterToken = this.findString(data, ['user_center_token', 'data.user_center_token']);
+    const userCenterId = this.findString(data, ['user_center_id', 'data.user_center_id']);
+    if (userCenterId) {
+      this.gtoken = createHash('md5').update(userCenterId).digest('hex');
     }
-    return token;
   }
 
   private async discoverDevice(): Promise<EufyCleanDevice | undefined> {
-    if (!this.accessToken) {
+    if (!this.userCenterToken || !this.gtoken) {
       return undefined;
     }
 
-    const response = await fetch(`${this.apiBaseUrl()}/v1/device/vacs`, {
-      headers: {
-        authorization: `Bearer ${this.accessToken}`,
-        country: this.config.country ?? 'US',
-      },
+    const mqttCredentials = await this.getMqttCredentials();
+    const response = await fetch(`${this.aiotApiBaseUrl()}/app/devicerelation/get_device_list`, {
+      method: 'POST',
+      headers: this.aiotHeaders(),
+      body: JSON.stringify({ attribute: 3 }),
     });
 
     if (!response.ok) {
@@ -195,32 +255,96 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     }
 
     const data = await response.json() as Record<string, unknown>;
-    const devices = this.findArray(data, ['devices', 'list', 'vacs']);
+    const devices = this.findArray(data, ['data.devices', 'devices', 'list', 'vacs']);
     const device = devices
       .map(value => value && typeof value === 'object' ? value as Record<string, unknown> : undefined)
-      .find(value => value && (!this.config.deviceId || this.findString(value, ['id', 'device_id', 'deviceId']) === this.config.deviceId));
+      .map(value => this.asRecord(value?.device) ?? value)
+      .find(value => value && (!this.config.deviceId || this.findString(value, ['device_sn', 'id', 'device_id', 'deviceId']) === this.config.deviceId));
 
     if (!device) {
       return undefined;
     }
 
+    const deviceId = this.findString(device, ['device_sn', 'id', 'device_id', 'deviceId']) ?? this.config.deviceId ?? '';
+    const deviceModel = this.config.deviceModel ?? this.findString(device, ['device_model', 'deviceModel', 'model']);
+    const mqtt = this.mqttFromCredentials(mqttCredentials, deviceId, deviceModel);
+
     return {
-      id: this.findString(device, ['id', 'device_id', 'deviceId']) ?? this.config.deviceId ?? '',
+      id: deviceId,
+      model: deviceModel,
       mqtt: {
-        host: this.findString(device, ['mqtt_host', 'mqttHost', 'mqtt.host']),
-        port: this.findNumber(device, ['mqtt_port', 'mqttPort', 'mqtt.port']),
-        clientId: this.findString(device, ['mqtt_client_id', 'mqttClientId', 'mqtt.clientId']),
-        username: this.findString(device, ['mqtt_username', 'mqttUsername', 'mqtt.username']),
-        password: this.findString(device, ['mqtt_password', 'mqttPassword', 'mqtt.password']),
-        commandTopic: this.findString(device, ['command_topic', 'commandTopic', 'mqtt.commandTopic']),
-        statusTopic: this.findString(device, ['status_topic', 'statusTopic', 'mqtt.statusTopic']),
+        ...mqtt,
+        host: this.findString(device, ['mqtt_host', 'mqttHost', 'mqtt.host']) ?? mqtt?.host,
+        port: this.findNumber(device, ['mqtt_port', 'mqttPort', 'mqtt.port']) ?? mqtt?.port,
       },
     };
   }
 
-  private async openMqtt(host: string, port: number, clientId: string, username?: string, password?: string): Promise<void> {
+  private async getMqttCredentials(): Promise<Record<string, unknown> | undefined> {
+    const response = await fetch(`${this.aiotApiBaseUrl()}/app/devicemanage/get_user_mqtt_info`, {
+      method: 'POST',
+      headers: this.aiotHeaders(),
+    });
+
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const data = await response.json() as Record<string, unknown>;
+    return this.asRecord(data.data) ?? data;
+  }
+
+  private mqttFromCredentials(credentials: Record<string, unknown> | undefined, deviceId: string, deviceModel?: string): EufyCleanDevice['mqtt'] {
+    if (!credentials) {
+      return undefined;
+    }
+
+    const endpoint = this.findString(credentials, ['endpoint_addr']);
+    const parsedEndpoint = endpoint ? this.parseMqttEndpoint(endpoint) : undefined;
+    const appName = this.findString(credentials, ['app_name']) ?? 'eufy_home';
+    const userId = this.findString(credentials, ['user_id']) ?? this.mqttUserId;
+    const thingName = this.findString(credentials, ['thing_name']);
+
+    if (!parsedEndpoint || !userId || !thingName || !deviceModel) {
+      return undefined;
+    }
+
+    this.mqttUserId = userId;
+    const clientId = `android-${appName}-eufy_android_${this.openudid}_${userId}-${Date.now()}`;
+    const commandTopics = [`cmd/eufy_home/${deviceModel}/${deviceId}/req`, `smart/mb/out/${deviceId}`];
+    const statusTopics = [`cmd/eufy_home/${deviceModel}/${deviceId}/res`, `smart/mb/in/${deviceId}`];
+
+    return {
+      host: parsedEndpoint.host,
+      port: parsedEndpoint.port,
+      clientId,
+      username: thingName,
+      certificatePem: this.findString(credentials, ['certificate_pem']),
+      privateKey: this.findString(credentials, ['private_key']),
+      commandTopic: commandTopics[0],
+      commandTopics,
+      statusTopic: statusTopics[0],
+      statusTopics,
+    };
+  }
+
+  private async openMqtt(
+    host: string,
+    port: number,
+    clientId: string,
+    username?: string,
+    password?: string,
+    certificatePem?: string,
+    privateKey?: string,
+  ): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-      const socket = tlsConnect({ host, port, servername: host });
+      const socket = tlsConnect({
+        host,
+        port,
+        servername: host,
+        cert: certificatePem ? Buffer.from(certificatePem, 'utf8') : undefined,
+        key: privateKey ? Buffer.from(privateKey, 'utf8') : undefined,
+      });
       const fail = (error: Error) => {
         socket.destroy();
         reject(error);
@@ -255,12 +379,15 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     if (!this.connected || !this.socket) {
       throw new Error('Eufy Clean cloud MQTT is not connected.');
     }
-    const topic = this.config.mqtt?.commandTopic;
+    const topics = this.commandTopics(this.config.mqtt);
     const deviceId = this.config.deviceId;
-    if (!topic || !deviceId) {
-      throw new Error('Eufy Clean command topic and deviceId are required.');
+    if (!topics.length || !deviceId) {
+      throw new Error('Eufy Clean command topics and deviceId are required.');
     }
-    this.socket.write(this.publishPacket(topic, this.codec.encodeCommand(deviceId, command, payload)));
+    const encoded = this.wrapCommand(deviceId, command, payload);
+    for (const topic of topics) {
+      this.socket.write(this.publishPacket(topic, encoded));
+    }
   }
 
   private async setCleanSpeed(speed: string): Promise<void> {
@@ -302,7 +429,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   }
 
   private handlePublish({ payload }: MqttPublish): void {
-    const status = this.codec.decodeStatus(payload);
+    const status = this.codec.decodeStatus(this.unwrapPayload(payload));
     this.setState(status.dps);
   }
 
@@ -392,6 +519,107 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     return this.config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
   }
 
+  private aiotApiBaseUrl(): string {
+    return this.config.aiotApiBaseUrl ?? DEFAULT_AIOT_API_BASE_URL;
+  }
+
+  private eufyHeaders(category: string): HeadersInit {
+    return {
+      accept: '*/*',
+      'content-type': 'application/json',
+      category,
+      openudid: this.openudid,
+      'accept-language': 'en-US',
+      clienttype: '1',
+      clientType: '1',
+      language: 'en',
+      country: this.config.country ?? 'US',
+      timezone: 'UTC',
+      'user-agent': USER_AGENT,
+    };
+  }
+
+  private aiotHeaders(): HeadersInit {
+    return {
+      ...this.eufyHeaders('Home'),
+      'os-version': 'Android',
+      'model-type': 'PHONE',
+      'app-name': 'eufy_home',
+      'x-auth-token': this.userCenterToken ?? '',
+      gtoken: this.gtoken ?? '',
+    };
+  }
+
+  private commandTopics(mqtt = this.config.mqtt): string[] {
+    return mqtt?.commandTopics ?? (mqtt?.commandTopic ? [mqtt.commandTopic] : []);
+  }
+
+  private statusTopics(mqtt = this.config.mqtt): string[] {
+    return mqtt?.statusTopics ?? (mqtt?.statusTopic ? [mqtt.statusTopic] : []);
+  }
+
+  private wrapCommand(deviceId: string, command: CloudCommand, payload: Record<string, unknown>): Buffer {
+    const dataPayload = this.codec.encodeCommand(deviceId, command, payload).toString('utf8');
+    const clientId = this.config.mqtt?.clientId ?? `android-eufy_home-eufy_android_${this.openudid}_${this.mqttUserId ?? ''}`;
+    return Buffer.from(JSON.stringify({
+      head: {
+        client_id: clientId,
+        cmd: 65537,
+        cmd_status: 1,
+        msg_seq: 2,
+        seed: '',
+        sess_id: clientId,
+        sign_code: 0,
+        timestamp: Date.now(),
+        version: '1.0.0.1',
+      },
+      payload: JSON.stringify({
+        account_id: this.mqttUserId,
+        data: dataPayload,
+        device_sn: deviceId,
+        protocol: 2,
+        t: Date.now(),
+      }),
+    }));
+  }
+
+  private unwrapPayload(payload: Buffer): Buffer {
+    try {
+      const parsed = JSON.parse(payload.toString('utf8')) as Record<string, unknown>;
+      const payloadValue = parsed.payload;
+      if (typeof payloadValue === 'string') {
+        const inner = JSON.parse(payloadValue) as Record<string, unknown>;
+        if (typeof inner.data === 'string') {
+          return Buffer.from(inner.data);
+        }
+        if (inner.data && typeof inner.data === 'object') {
+          return Buffer.from(JSON.stringify(inner.data));
+        }
+      }
+      if (payloadValue && typeof payloadValue === 'object') {
+        const data = (payloadValue as Record<string, unknown>).data;
+        if (typeof data === 'string') {
+          return Buffer.from(data);
+        }
+        if (data && typeof data === 'object') {
+          return Buffer.from(JSON.stringify(data));
+        }
+      }
+    } catch {
+      return payload;
+    }
+    return payload;
+  }
+
+  private parseMqttEndpoint(endpoint: string): { host: string; port: number } {
+    const normalized = endpoint.includes('://') ? endpoint : `mqtt://${endpoint}`;
+    const url = new URL(normalized);
+    return {
+      host: url.hostname,
+      port: url.port ? Number(url.port) : DEFAULT_MQTT_PORT,
+    };
+  }
+
   private numberState(key: string, fallback: number): number {
     const value = this.dps[key];
     return typeof value === 'number' ? value : fallback;
@@ -435,6 +663,13 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       }
     }
     return [];
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | undefined {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    return undefined;
   }
 
   private getPath(source: Record<string, unknown>, path: string): unknown {

@@ -40,8 +40,12 @@ export interface CloudMqttConfig {
   clientId?: string;
   username?: string;
   password?: string;
+  certificatePem?: string;
+  privateKey?: string;
   commandTopic?: string;
+  commandTopics?: string[];
   statusTopic?: string;
+  statusTopics?: string[];
   qos?: 0 | 1;
 }
 
@@ -51,6 +55,9 @@ export interface EufyCleanConfig {
   country?: string;
   accessToken?: string;
   apiBaseUrl?: string;
+  aiotApiBaseUrl?: string;
   deviceId?: string;
+  deviceModel?: string;
+  openudid?: string;
   mqtt?: CloudMqttConfig;
 }
