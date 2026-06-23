@@ -1,6 +1,6 @@
 import type { EufyCleanConfig, RobovacClient } from './types.js';
 
-import { randomBytes, createHash } from 'crypto';
+import { constants as cryptoConstants, createCipheriv, createHash, createHmac, createPublicKey, publicEncrypt, randomBytes, randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
 import mqtt, { type ISubscriptionGrant, type MqttClient } from 'mqtt';
 
@@ -26,12 +26,17 @@ interface EufyCleanDevice {
 }
 
 type CloudApiMode = 'novel' | 'legacy';
+type CloudCommandTransport = 'mqtt' | 'tuya-cloud';
 
 const DEFAULT_API_BASE_URL = 'https://home-api.eufylife.com';
 const DEFAULT_EUFY_API_BASE_URL = 'https://api.eufylife.com';
 const DEFAULT_AIOT_API_BASE_URL = 'https://aiot-clean-api-pr.eufylife.com';
 const DEFAULT_MQTT_PORT = 8883;
 const USER_AGENT = 'EufyHome-Android-3.1.3-753';
+const TUYA_APP_KEY = 'yx5v9uc3ef9wg3v9atje';
+const TUYA_APP_SECRET = 's8x78u7xwymasd9kqa7a73pjhxqsedaj';
+const TUYA_APP_SECRET_2 = 'cepev5pfnhua4dkqkdpmnrdxx378mpjr';
+const TUYA_CERT_SIGN = 'A';
 
 const NOVEL_DPS = {
   PLAY_PAUSE: '152',
@@ -71,6 +76,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private mqttClient?: MqttClient;
   private readonly codec = new EufyCleanCodec();
   private accessToken?: string;
+  private eufyUserId?: string;
   private userCenterToken?: string;
   private gtoken?: string;
   private mqttUserId?: string;
@@ -78,6 +84,11 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private readonly openudid: string;
   private readonly discoveryNotes: string[] = [];
   private cloudApiMode: CloudApiMode = 'novel';
+  private commandTransport: CloudCommandTransport = 'mqtt';
+  private tuyaSid?: string;
+  private tuyaEndpoint = 'https://a1.tuyaeu.com/api.json';
+  private tuyaRegion = 'EU';
+  private readonly tuyaDeviceId = randomBytes(22).toString('hex');
 
   constructor(private readonly config: EufyCleanConfig) {
     super();
@@ -94,6 +105,18 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     }
 
     const discoveredDevice = await this.discoverDevice();
+    if (this.shouldUseTuyaCloud(discoveredDevice?.model)) {
+      await this.openTuyaCloud();
+      this.commandTransport = 'tuya-cloud';
+      this.config.deviceModel = this.config.deviceModel ?? discoveredDevice?.model;
+      this.config.deviceId = this.config.deviceId ?? discoveredDevice?.id;
+      this.deviceId = this.config.deviceId;
+      this.connected = true;
+      this.emit('tuya.connected');
+      this.emit('cloud.connected');
+      return;
+    }
+
     const mqtt = {
       ...discoveredDevice?.mqtt,
       ...this.config.mqtt,
@@ -146,6 +169,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   async disconnect(): Promise<void> {
     this.mqttClient?.end();
     this.mqttClient = undefined;
+    this.tuyaSid = undefined;
     this.connected = false;
     this.emit('tuya.disconnected');
     this.emit('cloud.disconnected');
@@ -247,6 +271,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       const data = await response.json() as Record<string, unknown>;
       const token = this.findString(data, ['access_token', 'token', 'auth_token']);
       if (token) {
+        this.eufyUserId = this.findString(data, ['user_id', 'data.user_id']);
         this.discoveryNotes.push(`login:${loginConfig.category}:ok`);
         return token;
       }
@@ -451,6 +476,200 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     return devices;
   }
 
+  private shouldUseTuyaCloud(deviceModel?: string): boolean {
+    if (!this.config.email || !this.config.password || !this.eufyUserId) {
+      return false;
+    }
+    const model = this.config.deviceModel ?? deviceModel;
+    return !!model && !NOVEL_MODEL_PREFIXES.has(model);
+  }
+
+  private async openTuyaCloud(): Promise<void> {
+    const regions = ['EU', 'US'];
+    let lastError: unknown;
+    for (const region of regions) {
+      try {
+        this.tuyaRegion = region;
+        this.tuyaEndpoint = region === 'US' ? 'https://a1.tuyaus.com/api.json' : 'https://a1.tuyaeu.com/api.json';
+        this.tuyaSid = await this.tuyaLogin();
+        this.emit('debug', `Connected to Eufy/Tuya cloud command API in ${this.tuyaRegion}`);
+        return;
+      } catch (error) {
+        lastError = error;
+        this.emit('debug', `Eufy/Tuya cloud ${region} login failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    throw new Error(`Eufy/Tuya cloud login failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+  }
+
+  private async tuyaLogin(): Promise<string> {
+    const token = await this.tuyaRequest<{ publicKey: string; exponent: string | number; token: string }>({
+      action: 'tuya.m.user.uid.token.create',
+      data: { countryCode: this.tuyaRegion, uid: `eh-${this.eufyUserId}` },
+      requiresSID: false,
+    });
+
+    const encryptedPass = this.tuyaEncryptedPassword(token.publicKey, Number(token.exponent));
+    const login = await this.tuyaRequest<{
+      sid: string;
+      domain?: {
+        mobileApiUrl?: string;
+        regionCode?: string;
+      };
+    }>({
+      action: 'tuya.m.user.uid.password.login',
+      data: {
+        countryCode: this.tuyaRegion,
+        uid: `eh-${this.eufyUserId}`,
+        createGroup: true,
+        passwd: encryptedPass,
+        ifencrypt: 1,
+        options: { group: 1 },
+        token: token.token,
+      },
+      requiresSID: false,
+    });
+
+    if (login.domain?.mobileApiUrl && !this.tuyaEndpoint.startsWith(login.domain.mobileApiUrl)) {
+      this.tuyaEndpoint = `${login.domain.mobileApiUrl}/api.json`;
+      this.tuyaRegion = login.domain.regionCode ?? this.tuyaRegion;
+    }
+    this.tuyaSid = login.sid;
+    return login.sid;
+  }
+
+  private tuyaEncryptedPassword(publicKey: string, exponent: number): string {
+    const keyBytes = this.publicKeyBytes(publicKey);
+    const key = createPublicKey({
+      key: {
+        kty: 'RSA',
+        n: this.base64Url(keyBytes),
+        e: this.base64Url(this.exponentBytes(exponent)),
+      },
+      format: 'jwk',
+    });
+    const cipher = createCipheriv(
+      'aes-128-cbc',
+      Buffer.from([36, 78, 109, 138, 86, 172, 135, 145, 36, 67, 45, 139, 108, 188, 162, 196]),
+      Buffer.from([119, 36, 86, 242, 167, 102, 76, 243, 57, 44, 53, 151, 233, 62, 87, 71]),
+    );
+    const uid = `eh-${this.eufyUserId}`;
+    const paddingSize = 16 * Math.ceil(uid.length / 16);
+    const encrypted = cipher.update(uid.padStart(paddingSize, '0'), 'utf8', 'hex');
+    const passwordHash = Buffer.from(this.md5(encrypted.toUpperCase()));
+    const paddedHash = Buffer.concat([Buffer.alloc(Math.max(keyBytes.length - passwordHash.length, 0)), passwordHash]);
+    return publicEncrypt({ key, padding: cryptoConstants.RSA_NO_PADDING }, paddedHash).toString('hex');
+  }
+
+  private async tuyaRequest<T>(options: {
+    action: string;
+    data?: Record<string, unknown>;
+    gid?: string;
+    requiresSID?: boolean;
+    version?: string;
+  }): Promise<T> {
+    const requiresSID = options.requiresSID ?? true;
+    if (requiresSID && !this.tuyaSid) {
+      throw new Error('Eufy/Tuya cloud session is not connected.');
+    }
+
+    const pairs: Record<string, string> = {
+      a: options.action,
+      deviceId: this.tuyaDeviceId,
+      sdkVersion: '3.0.0cAnker',
+      os: 'Android',
+      lang: 'en',
+      appVersion: '3.8.5',
+      v: options.version ?? '1.0',
+      clientId: TUYA_APP_KEY,
+      time: String(Math.round(Date.now() / 1000)),
+      et: '0.0.1',
+      ttid: 'android',
+      appRnVersion: '5.11',
+      platform: 'Android',
+      requestId: randomUUID(),
+    };
+    if (options.data) {
+      pairs.postData = JSON.stringify(options.data);
+    }
+    if (options.gid) {
+      pairs.gid = options.gid;
+    }
+    if (requiresSID && this.tuyaSid) {
+      pairs.sid = this.tuyaSid;
+    }
+
+    pairs.sign = this.tuyaSign(pairs);
+    const response = await fetch(`${this.tuyaEndpoint}?${new URLSearchParams(pairs).toString()}`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json() as { success?: boolean; errorCode?: string; errorMsg?: string; result?: T };
+    if (data.success === false) {
+      throw new Error(`${data.errorCode ?? 'TUYA_ERROR'}: ${data.errorMsg ?? 'unknown error'}`);
+    }
+    return data.result as T;
+  }
+
+  private tuyaSign(pairs: Record<string, string>): string {
+    const valuesToSign = new Set([
+      'a', 'v', 'lat', 'lon', 'lang', 'deviceId', 'imei', 'imsi', 'appVersion', 'ttid',
+      'isH5', 'h5Token', 'os', 'clientId', 'postData', 'time', 'requestId', 'n4h5',
+      'sid', 'sp', 'et',
+    ]);
+    const value = Object.keys(pairs)
+      .sort()
+      .filter(key => valuesToSign.has(key) && pairs[key])
+      .map(key => `${key}=${key === 'postData' ? this.mobileHash(pairs[key]) : pairs[key]}`)
+      .join('||');
+    return createHmac('sha256', `${TUYA_CERT_SIGN}_${TUYA_APP_SECRET_2}_${TUYA_APP_SECRET}`).update(value).digest('hex');
+  }
+
+  private async sendTuyaCloudCommand(dataPayload: Record<string, unknown>): Promise<void> {
+    const deviceId = this.config.deviceId;
+    if (!deviceId) {
+      throw new Error('Eufy/Tuya cloud deviceId is required.');
+    }
+    await this.tuyaRequest({
+      action: 'tuya.m.device.dp.publish',
+      data: {
+        dps: dataPayload,
+        devId: deviceId,
+        gwId: deviceId,
+      },
+    });
+    this.emit('debug', `Eufy/Tuya cloud command accepted with DPS keys: ${Object.keys(dataPayload).join(', ')}`);
+  }
+
+  private publicKeyBytes(publicKey: string): Buffer {
+    return /^[0-9a-f]+$/i.test(publicKey)
+      ? Buffer.from(publicKey, 'hex')
+      : Buffer.from(publicKey, 'base64');
+  }
+
+  private exponentBytes(exponent: number): Buffer {
+    const bytes: number[] = [];
+    let value = exponent;
+    do {
+      bytes.unshift(value & 0xff);
+      value >>= 8;
+    } while (value > 0);
+    return Buffer.from(bytes);
+  }
+
+  private base64Url(value: Buffer): string {
+    return value.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  private md5(value: string): string {
+    return createHash('md5').update(value).digest('hex');
+  }
+
+  private mobileHash(value: string): string {
+    const hash = this.md5(value);
+    return hash.slice(8, 16) + hash.slice(0, 8) + hash.slice(24, 32) + hash.slice(16, 24);
+  }
+
   private mqttFromCredentials(credentials: Record<string, unknown> | undefined, deviceId: string, deviceModel?: string): EufyCleanDevice['mqtt'] {
     if (!credentials) {
       return undefined;
@@ -551,6 +770,18 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   }
 
   private async sendCommand(command: CloudCommand, payload: Record<string, unknown> = {}): Promise<void> {
+    if (this.commandTransport === 'tuya-cloud') {
+      const dataPayloads = this.legacyCommandPayload(command, payload);
+      for (const dataPayload of dataPayloads) {
+        this.emit(
+          'debug',
+          `Publishing Eufy/Tuya cloud ${command} command using DPS keys: ${Object.keys(dataPayload).join(', ')}`,
+        );
+        await this.sendTuyaCloudCommand(dataPayload);
+      }
+      return;
+    }
+
     if (!this.connected || !this.mqttClient) {
       throw new Error('Eufy Clean cloud MQTT is not connected.');
     }
