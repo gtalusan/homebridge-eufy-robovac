@@ -87,6 +87,14 @@
           "functionBody": "return model.transport === 'eufy-clean-cloud';"
         }
       },
+      "deviceModel": {
+        "title": "Eufy Clean Device Model",
+        "description": "Optional model code override for cloud/MQTT mode. The plugin normally discovers this from Eufy Clean.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud';"
+        }
+      },
       "showAdvancedMqtt": {
         "title": "Show Advanced MQTT Overrides",
         "description": "Enable only if you need to manually override MQTT settings. The plugin normally discovers these from Eufy Clean.",
@@ -177,14 +185,6 @@
         "required": true,
         "condition": {
           "functionBody": "return !model.transport || model.transport === 'legacy-tuya';"
-        }
-      },
-      "deviceModel": {
-        "title": "Eufy Clean Device Model",
-        "description": "Optional model code override for cloud/MQTT mode. The plugin normally discovers this from Eufy Clean.",
-        "type": "string",
-        "condition": {
-          "functionBody": "return model.transport === 'eufy-clean-cloud';"
         }
       },
       "deviceKey": {
