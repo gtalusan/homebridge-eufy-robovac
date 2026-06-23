@@ -48,6 +48,7 @@ interface ProtoMessage {
 const DEFAULT_API_BASE_URL = 'https://home-api.eufylife.com';
 const DEFAULT_EUFY_API_BASE_URL = 'https://api.eufylife.com';
 const DEFAULT_AIOT_API_BASE_URL = 'https://aiot-clean-api-pr.eufylife.com';
+const DEFAULT_DEVICE_RELATION_API_BASE_URL = 'https://app-devicerelation-eu-pr.eufy.com';
 const DEFAULT_MQTT_PORT = 8883;
 const USER_AGENT = 'EufyHome-Android-3.1.3-753';
 const TUYA_APP_KEY = 'yx5v9uc3ef9wg3v9atje';
@@ -139,12 +140,12 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       this.deviceId = this.config.deviceId;
       await this.openTuyaCloud();
       const tuyaDevice = await this.getTuyaCloudDevice();
-      const tuyaMapMetadata = await this.getTuyaMapMetadata(tuyaDevice);
+      const roomListMetadata = await this.getEufyRoomListMetadata(discoveredDevice?.raw);
       const productDataPointMetadata = await this.getProductDataPointMetadata(this.config.deviceModel);
       this.connected = true;
       this.emit('tuya.connected');
       this.emit('cloud.connected');
-      this.logAvailableRooms(discoveredDevice?.raw, tuyaDevice, ...tuyaMapMetadata, ...productDataPointMetadata);
+      this.logAvailableRooms(discoveredDevice?.raw, tuyaDevice, ...roomListMetadata, ...productDataPointMetadata);
       return;
     }
 
@@ -192,7 +193,8 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     this.emit('tuya.connected');
     this.emit('cloud.connected');
     const productDataPointMetadata = await this.getProductDataPointMetadata(this.config.deviceModel);
-    this.logAvailableRooms(discoveredDevice?.raw, ...productDataPointMetadata);
+    const roomListMetadata = await this.getEufyRoomListMetadata(discoveredDevice?.raw);
+    this.logAvailableRooms(discoveredDevice?.raw, ...roomListMetadata, ...productDataPointMetadata);
   }
 
   async connect(): Promise<void> {
@@ -827,6 +829,57 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       this.emit('debug', `Could not fetch Eufy/Tuya cloud device metadata: ${error instanceof Error ? error.message : String(error)}`);
     }
     return undefined;
+  }
+
+  private async getEufyRoomListMetadata(deviceMetadata?: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+    const deviceId = this.config.deviceId;
+    if (!deviceId || !this.userCenterToken || !this.gtoken) {
+      return [];
+    }
+
+    const homeId = deviceMetadata ? this.findString(deviceMetadata, ['home_id', 'homeId', 'home.id']) : undefined;
+    const payload = Object.fromEntries(Object.entries({
+      device_sn: deviceId,
+      device_id: deviceId,
+      home_id: homeId,
+    }).filter(([, value]) => value !== undefined));
+
+    try {
+      const response = await fetch(`${DEFAULT_DEVICE_RELATION_API_BASE_URL}/app/devicerelation/get_room_list`, {
+        method: 'POST',
+        headers: {
+          ...this.aiotHeaders(),
+          accept: 'application/json',
+          authorization: this.userCenterToken,
+          country: this.config.country ?? 'US',
+          'app-name': 'eufy_mega',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        this.emit('debug', `Eufy room list endpoint failed with HTTP ${response.status}`);
+        return [];
+      }
+
+      const result = await response.json() as Record<string, unknown>;
+      const data = result.data;
+      if (typeof data === 'string') {
+        const encryptedBytes = Buffer.from(data, 'base64').length;
+        this.emit(
+          'info',
+          `Eufy room list endpoint returned encrypted data (${encryptedBytes} bytes); `
+          + 'ECDH app encryption is required before room names can be read.',
+        );
+      } else {
+        this.emit('info', `Eufy room list endpoint returned keys=${this.safeKeys(result).join(',') || 'none'}`);
+      }
+      return [{ roomListProbe: result }];
+    } catch (error) {
+      this.emit('debug', `Eufy room list endpoint probe failed: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
   }
 
   private async getTuyaMapMetadata(tuyaDevice?: Record<string, unknown>): Promise<Record<string, unknown>[]> {
