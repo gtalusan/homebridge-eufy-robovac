@@ -123,12 +123,12 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
 
     const discoveredDevice = await this.discoverDevice();
     if (this.shouldUseTuyaCloud(discoveredDevice?.model)) {
-      await this.openTuyaCloud();
-      const tuyaDevice = await this.getTuyaCloudDevice();
       this.commandTransport = 'tuya-cloud';
       this.config.deviceModel = this.config.deviceModel ?? discoveredDevice?.model;
       this.config.deviceId = this.config.deviceId ?? discoveredDevice?.id;
       this.deviceId = this.config.deviceId;
+      await this.openTuyaCloud();
+      const tuyaDevice = await this.getTuyaCloudDevice();
       this.connected = true;
       this.emit('tuya.connected');
       this.emit('cloud.connected');
@@ -662,11 +662,13 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private async getTuyaCloudDevice(): Promise<Record<string, unknown> | undefined> {
     const deviceId = this.config.deviceId;
     if (!deviceId) {
+      this.emit('debug', 'Skipping Eufy/Tuya cloud device metadata fetch because no deviceId is available yet.');
       return undefined;
     }
 
     try {
       const groups = await this.tuyaRequest<Array<Record<string, unknown>>>({ action: 'tuya.m.location.list' });
+      const discoveredDevices: Record<string, unknown>[] = [];
       for (const group of groups) {
         const gid = this.findString(group, ['groupId', 'id']);
         const groupDevices = gid
@@ -675,7 +677,8 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
         const sharedDevices = await this.tuyaRequest<unknown[]>({ action: 'tuya.m.my.shared.device.list' });
         const devices = [...groupDevices, ...sharedDevices]
           .filter((value): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value));
-        const device = devices.find(value => this.findString(value, ['devId', 'id', 'deviceId']) === deviceId);
+        discoveredDevices.push(...devices);
+        const device = devices.find(value => this.tuyaDeviceMatches(value, deviceId));
         if (device) {
           this.emit('debug', `Fetched Eufy/Tuya cloud device metadata with keys: ${this.safeKeys(device).join(',')}`);
           const dps = this.asRecord(device.dps);
@@ -685,10 +688,46 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
           return device;
         }
       }
+      const uniqueDevices = this.uniqueTuyaDevices(discoveredDevices);
+      if (uniqueDevices.length === 1) {
+        const [device] = uniqueDevices;
+        this.emit('info', 'Using the only Eufy/Tuya cloud device metadata record found for startup room discovery.');
+        const dps = this.asRecord(device.dps);
+        if (dps) {
+          this.emit('info', `Eufy/Tuya cloud DPS keys: ${Object.keys(dps).sort().join(', ')}`);
+        }
+        return device;
+      }
+      if (uniqueDevices.length > 0) {
+        this.emit(
+          'info',
+          `Eufy/Tuya cloud metadata fetch found ${uniqueDevices.length} devices but none matched the configured device id.`,
+        );
+      }
     } catch (error) {
       this.emit('debug', `Could not fetch Eufy/Tuya cloud device metadata: ${error instanceof Error ? error.message : String(error)}`);
     }
     return undefined;
+  }
+
+  private tuyaDeviceMatches(device: Record<string, unknown>, deviceId: string): boolean {
+    return this.tuyaDeviceIds(device).includes(deviceId);
+  }
+
+  private uniqueTuyaDevices(devices: Record<string, unknown>[]): Record<string, unknown>[] {
+    const unique = new Map<string, Record<string, unknown>>();
+    for (const device of devices) {
+      const key = this.tuyaDeviceIds(device)[0] ?? JSON.stringify(this.safeKeys(device));
+      unique.set(key, device);
+    }
+    return [...unique.values()];
+  }
+
+  private tuyaDeviceIds(device: Record<string, unknown>): string[] {
+    return [
+      this.findString(device, ['devId', 'id', 'deviceId', 'device_id', 'gwId', 'uuid', 'virtualId']),
+      this.findString(device, ['dev_id', 'device.devId', 'device.id', 'device.deviceId']),
+    ].filter((value): value is string => !!value);
   }
 
   private tuyaSign(pairs: Record<string, string>): string {
