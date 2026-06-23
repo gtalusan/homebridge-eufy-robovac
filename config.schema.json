@@ -197,7 +197,7 @@
         }
       },
       "roomSwitches": {
-        "description": "Rooms - configure according to the eufy clean app.  These are optional.  If no rooms, then the Eufy Robovac will be configured for Auto mode. Configured rooms and their corresponding numbers are shown in the plugin logs on startup.",
+        "description": "Optional manual room switches. Use the room numbers shown by the Eufy Clean app map. If no rooms are configured, the RoboVac uses Auto mode.",
         "type": "array",
         "items": {
           "title": "Room",
