@@ -61,4 +61,8 @@ export interface EufyCleanConfig {
   deviceModel?: string;
   openudid?: string;
   mqtt?: CloudMqttConfig;
+  roomSwitches?: Array<{
+    name?: string;
+    rooms?: string;
+  }>;
 }

@@ -92,6 +92,9 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
         this.robovac.on('error', (error: string) => {
           this.log.info(error);
         });
+        this.robovac.on('info', (message: string) => {
+          this.log.info(message);
+        });
         this.robovac.on('debug', (message: string) => {
           this.log.debug(message);
         });

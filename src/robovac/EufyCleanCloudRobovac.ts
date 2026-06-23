@@ -10,6 +10,7 @@ import { EufyCleanCodec, type CloudCommand } from './EufyCleanCodec.js';
 interface EufyCleanDevice {
   id: string;
   model?: string;
+  raw?: Record<string, unknown>;
   mqtt?: {
     host?: string;
     port?: number;
@@ -28,6 +29,11 @@ interface EufyCleanDevice {
 
 type CloudApiMode = 'novel' | 'legacy';
 type CloudCommandTransport = 'mqtt' | 'tuya-cloud';
+interface RoomLogEntry {
+  id: string;
+  label: string;
+  source: string;
+}
 
 const DEFAULT_API_BASE_URL = 'https://home-api.eufylife.com';
 const DEFAULT_EUFY_API_BASE_URL = 'https://api.eufylife.com';
@@ -125,6 +131,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       this.connected = true;
       this.emit('tuya.connected');
       this.emit('cloud.connected');
+      this.logAvailableRooms(discoveredDevice?.raw);
       return;
     }
 
@@ -171,6 +178,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     this.connected = true;
     this.emit('tuya.connected');
     this.emit('cloud.connected');
+    this.logAvailableRooms(discoveredDevice?.raw);
   }
 
   async connect(): Promise<void> {
@@ -365,6 +373,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
         return {
           id: this.config.deviceId,
           model: this.config.deviceModel,
+          raw: {},
           mqtt,
         };
       }
@@ -382,6 +391,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     return {
       id: deviceId,
       model: deviceModel,
+      raw: device,
       mqtt: {
         ...mqtt,
         host: this.findString(device, ['mqtt_host', 'mqttHost', 'mqtt.host']) ?? mqtt?.host,
@@ -1017,6 +1027,77 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private commandClientId(): string {
     const clientId = this.config.mqtt?.clientId ?? `android-eufy_home-eufy_android_${this.openudid}_${this.mqttUserId ?? ''}`;
     return clientId.replace(/-\d+$/, '');
+  }
+
+  private logAvailableRooms(discoveredDevice?: Record<string, unknown>): void {
+    const configuredRooms = this.configuredRoomEntries();
+    const discoveredRooms = this.discoveredRoomEntries(discoveredDevice);
+
+    if (configuredRooms.length) {
+      this.emit('info', `Configured Eufy room switches: ${this.formatRoomEntries(configuredRooms)}`);
+    } else {
+      this.emit('info', 'Configured Eufy room switches: none');
+    }
+
+    if (discoveredRooms.length) {
+      this.emit('info', `Discovered Eufy room candidates: ${this.formatRoomEntries(discoveredRooms)}`);
+    } else {
+      this.emit('info', 'Discovered Eufy room candidates: none found in startup metadata');
+    }
+  }
+
+  private configuredRoomEntries(): RoomLogEntry[] {
+    return (this.config.roomSwitches ?? [])
+      .flatMap(roomSwitch => {
+        const label = roomSwitch.name?.trim();
+        const rooms = roomSwitch.rooms?.split(',').map(value => value.trim()).filter(value => value.length > 0) ?? [];
+        if (!label || rooms.length === 0) {
+          return [];
+        }
+        return rooms.map(id => ({ id, label, source: 'config' }));
+      });
+  }
+
+  private discoveredRoomEntries(value: unknown): RoomLogEntry[] {
+    const entries = new Map<string, RoomLogEntry>();
+    this.collectRoomEntries(value, [], entries);
+    return [...entries.values()];
+  }
+
+  private collectRoomEntries(value: unknown, path: string[], entries: Map<string, RoomLogEntry>): void {
+    if (Array.isArray(value)) {
+      value.forEach(item => this.collectRoomEntries(item, path, entries));
+      return;
+    }
+
+    if (!value || typeof value !== 'object') {
+      return;
+    }
+
+    const record = value as Record<string, unknown>;
+    const pathText = path.join('.').toLowerCase();
+    const roomContext = /\b(room|rooms|scene|scenes|area|areas|map)\b/.test(pathText);
+    if (roomContext) {
+      const id = this.findString(record, ['room_id', 'roomId', 'id', 'room', 'scene_id', 'sceneId', 'area_id', 'areaId']);
+      const label = this.findString(record, ['name', 'label', 'room_name', 'roomName', 'scene_name', 'sceneName', 'area_name', 'areaName']);
+      if (id && label) {
+        entries.set(`${id}:${label}`, {
+          id,
+          label,
+          source: path.join('.') || 'metadata',
+        });
+      }
+    }
+
+    for (const [key, child] of Object.entries(record)) {
+      this.collectRoomEntries(child, [...path, key], entries);
+    }
+  }
+
+  private formatRoomEntries(entries: RoomLogEntry[]): string {
+    return entries
+      .map(entry => `${entry.id}="${entry.label}" (${entry.source})`)
+      .join(', ');
   }
 
   private unwrapPayload(payload: Buffer): Buffer {

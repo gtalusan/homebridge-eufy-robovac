@@ -58,6 +58,9 @@ function toEufyCleanConfig(config: PlatformConfig): EufyCleanConfig {
     deviceModel: stringValue(config.deviceModel),
     openudid: stringValue(config.openudid),
     mqtt: Object.keys(mqtt).length > 0 ? mqtt : undefined,
+    roomSwitches: Array.isArray(config.roomSwitches)
+      ? config.roomSwitches.map(value => value && typeof value === 'object' ? value as { name?: string; rooms?: string } : {})
+      : undefined,
   };
 }
 
