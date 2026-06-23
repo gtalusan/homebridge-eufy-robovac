@@ -124,6 +124,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     const discoveredDevice = await this.discoverDevice();
     if (this.shouldUseTuyaCloud(discoveredDevice?.model)) {
       await this.openTuyaCloud();
+      const tuyaDevice = await this.getTuyaCloudDevice();
       this.commandTransport = 'tuya-cloud';
       this.config.deviceModel = this.config.deviceModel ?? discoveredDevice?.model;
       this.config.deviceId = this.config.deviceId ?? discoveredDevice?.id;
@@ -131,7 +132,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       this.connected = true;
       this.emit('tuya.connected');
       this.emit('cloud.connected');
-      this.logAvailableRooms(discoveredDevice?.raw);
+      this.logAvailableRooms(discoveredDevice?.raw, tuyaDevice);
       return;
     }
 
@@ -658,6 +659,38 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     return data.result as T;
   }
 
+  private async getTuyaCloudDevice(): Promise<Record<string, unknown> | undefined> {
+    const deviceId = this.config.deviceId;
+    if (!deviceId) {
+      return undefined;
+    }
+
+    try {
+      const groups = await this.tuyaRequest<Array<Record<string, unknown>>>({ action: 'tuya.m.location.list' });
+      for (const group of groups) {
+        const gid = this.findString(group, ['groupId', 'id']);
+        const groupDevices = gid
+          ? await this.tuyaRequest<unknown[]>({ action: 'tuya.m.my.group.device.list', gid })
+          : [];
+        const sharedDevices = await this.tuyaRequest<unknown[]>({ action: 'tuya.m.my.shared.device.list' });
+        const devices = [...groupDevices, ...sharedDevices]
+          .filter((value): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value));
+        const device = devices.find(value => this.findString(value, ['devId', 'id', 'deviceId']) === deviceId);
+        if (device) {
+          this.emit('debug', `Fetched Eufy/Tuya cloud device metadata with keys: ${this.safeKeys(device).join(',')}`);
+          const dps = this.asRecord(device.dps);
+          if (dps) {
+            this.emit('info', `Eufy/Tuya cloud DPS keys: ${Object.keys(dps).sort().join(', ')}`);
+          }
+          return device;
+        }
+      }
+    } catch (error) {
+      this.emit('debug', `Could not fetch Eufy/Tuya cloud device metadata: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return undefined;
+  }
+
   private tuyaSign(pairs: Record<string, string>): string {
     const valuesToSign = new Set([
       'a', 'v', 'lat', 'lon', 'lang', 'deviceId', 'imei', 'imsi', 'appVersion', 'ttid',
@@ -1029,9 +1062,9 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     return clientId.replace(/-\d+$/, '');
   }
 
-  private logAvailableRooms(discoveredDevice?: Record<string, unknown>): void {
+  private logAvailableRooms(...metadata: Array<Record<string, unknown> | undefined>): void {
     const configuredRooms = this.configuredRoomEntries();
-    const discoveredRooms = this.discoveredRoomEntries(discoveredDevice);
+    const discoveredRooms = metadata.flatMap(value => this.discoveredRoomEntries(value));
 
     if (configuredRooms.length) {
       this.emit('info', `Configured Eufy room switches: ${this.formatRoomEntries(configuredRooms)}`);
