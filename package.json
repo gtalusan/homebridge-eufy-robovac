@@ -57,6 +57,7 @@
   },
   "dependencies": {
     "@george.talusan/eufy-robovac-js": "^0.0.13",
-    "mqtt": "^5.15.1"
+    "mqtt": "^5.15.1",
+    "node-rsa": "^1.1.1"
   }
 }

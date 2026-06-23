@@ -1,7 +1,8 @@
 import type { EufyCleanConfig, RobovacClient } from './types.js';
 
-import { createCipheriv, createHash, createHmac, randomBytes, randomUUID } from 'crypto';
+import { constants as cryptoConstants, createCipheriv, createHash, createHmac, randomBytes, randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
+import { createRequire } from 'module';
 import mqtt, { type ISubscriptionGrant, type MqttClient } from 'mqtt';
 
 import { EufyCleanCodec, type CloudCommand } from './EufyCleanCodec.js';
@@ -37,6 +38,15 @@ const TUYA_APP_KEY = 'yx5v9uc3ef9wg3v9atje';
 const TUYA_APP_SECRET = 's8x78u7xwymasd9kqa7a73pjhxqsedaj';
 const TUYA_APP_SECRET_2 = 'cepev5pfnhua4dkqkdpmnrdxx378mpjr';
 const TUYA_CERT_SIGN = 'A';
+const require = createRequire(import.meta.url);
+const NodeRSA = require('node-rsa') as new (
+  key?: unknown,
+  formatOrOptions?: unknown,
+  options?: unknown,
+) => {
+  importKey(key: unknown, format: string): void;
+  encrypt(buffer: Buffer, encoding: 'hex'): string;
+};
 
 const NOVEL_DPS = {
   PLAY_PAUSE: '152',
@@ -561,7 +571,22 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   }
 
   private tuyaEncryptedPassword(publicKey: string, exponent: number): string {
-    const keyBytes = this.publicKeyBytes(publicKey);
+    const key = new NodeRSA(
+      {},
+      {
+        encryptionScheme: {
+          scheme: 'pkcs1',
+          padding: cryptoConstants.RSA_NO_PADDING,
+        },
+      },
+    );
+    key.importKey(
+      {
+        n: publicKey,
+        e: exponent,
+      },
+      'components-public',
+    );
     const cipher = createCipheriv(
       'aes-128-cbc',
       Buffer.from([36, 78, 109, 138, 86, 172, 135, 145, 36, 67, 45, 139, 108, 188, 162, 196]),
@@ -570,8 +595,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     const uid = `eh-${this.eufyUserId}`;
     const paddingSize = 16 * Math.ceil(uid.length / 16);
     const encrypted = cipher.update(uid.padStart(paddingSize, '0'), 'utf8', 'hex');
-    const passwordHash = Buffer.from(this.md5(encrypted.toUpperCase()));
-    return this.rawRsaEncrypt(passwordHash, keyBytes, exponent).toString('hex');
+    return key.encrypt(Buffer.from(this.md5(encrypted.toUpperCase())), 'hex');
   }
 
   private async tuyaRequest<T>(options: {
@@ -652,54 +676,6 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       },
     });
     this.emit('debug', `Eufy/Tuya cloud command accepted with DPS keys: ${Object.keys(dataPayload).join(', ')}`);
-  }
-
-  private publicKeyBytes(publicKey: string): Buffer {
-    return /^[0-9a-f]+$/i.test(publicKey)
-      ? Buffer.from(publicKey, 'hex')
-      : Buffer.from(publicKey, 'base64');
-  }
-
-  private exponentBytes(exponent: number): Buffer {
-    const bytes: number[] = [];
-    let value = exponent;
-    do {
-      bytes.unshift(value & 0xff);
-      value >>= 8;
-    } while (value > 0);
-    return Buffer.from(bytes);
-  }
-
-  private rawRsaEncrypt(message: Buffer, modulus: Buffer, exponent: number): Buffer {
-    const m = this.bufferToBigInt(message);
-    const n = this.bufferToBigInt(modulus);
-    const e = BigInt(exponent);
-    const c = this.modPow(m, e, n);
-    return this.bigIntToBuffer(c, modulus.length);
-  }
-
-  private modPow(base: bigint, exponent: bigint, modulus: bigint): bigint {
-    let result = 1n;
-    let nextBase = base % modulus;
-    let nextExponent = exponent;
-    while (nextExponent > 0n) {
-      if (nextExponent & 1n) {
-        result = (result * nextBase) % modulus;
-      }
-      nextExponent >>= 1n;
-      nextBase = (nextBase * nextBase) % modulus;
-    }
-    return result;
-  }
-
-  private bufferToBigInt(value: Buffer): bigint {
-    const hex = value.toString('hex') || '0';
-    return BigInt(`0x${hex}`);
-  }
-
-  private bigIntToBuffer(value: bigint, length: number): Buffer {
-    const hex = value.toString(16).padStart(length * 2, '0');
-    return Buffer.from(hex, 'hex');
   }
 
   private md5(value: string): string {
