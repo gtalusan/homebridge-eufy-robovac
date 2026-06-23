@@ -139,10 +139,11 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       this.deviceId = this.config.deviceId;
       await this.openTuyaCloud();
       const tuyaDevice = await this.getTuyaCloudDevice();
+      const tuyaMapMetadata = await this.getTuyaMapMetadata(tuyaDevice);
       this.connected = true;
       this.emit('tuya.connected');
       this.emit('cloud.connected');
-      this.logAvailableRooms(discoveredDevice?.raw, tuyaDevice);
+      this.logAvailableRooms(discoveredDevice?.raw, tuyaDevice, ...tuyaMapMetadata);
       return;
     }
 
@@ -718,6 +719,78 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       this.emit('debug', `Could not fetch Eufy/Tuya cloud device metadata: ${error instanceof Error ? error.message : String(error)}`);
     }
     return undefined;
+  }
+
+  private async getTuyaMapMetadata(tuyaDevice?: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+    const configuredDeviceId = this.config.deviceId;
+    const deviceId = tuyaDevice ? this.tuyaDeviceIds(tuyaDevice)[0] ?? configuredDeviceId : configuredDeviceId;
+    if (!deviceId) {
+      return [];
+    }
+
+    const baseData = {
+      devId: deviceId,
+      deviceId,
+      gwId: deviceId,
+    };
+    const probes = [
+      { action: 'tuya.m.device.map.latest', data: baseData },
+      { action: 'tuya.m.device.map.get', data: baseData },
+      { action: 'tuya.m.device.map.list', data: baseData },
+      { action: 'tuya.m.device.map.data.get', data: baseData },
+      { action: 'tuya.m.device.clean.record.list', data: { ...baseData, limit: 1, offset: 0 } },
+    ];
+    const results: Record<string, unknown>[] = [];
+    let failures = 0;
+
+    for (const probe of probes) {
+      try {
+        const result = await this.tuyaRequest<unknown>(probe);
+        const record = this.mapProbeRecord(probe.action, result);
+        results.push(record);
+        this.emit('info', `Eufy/Tuya map probe ${probe.action} returned ${this.describeProbeResult(result)}`);
+      } catch (error) {
+        failures += 1;
+        this.emit(
+          'debug',
+          `Eufy/Tuya map probe ${probe.action} failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    if (results.length === 0) {
+      this.emit(
+        'info',
+        `Eufy/Tuya map probes did not find a readable map endpoint; tried ${probes.length} read-only actions (${failures} failed).`,
+      );
+    }
+
+    return results;
+  }
+
+  private mapProbeRecord(action: string, result: unknown): Record<string, unknown> {
+    return {
+      mapProbe: {
+        action,
+        result,
+      },
+    };
+  }
+
+  private describeProbeResult(result: unknown): string {
+    if (Array.isArray(result)) {
+      return `array length ${result.length}`;
+    }
+    if (result && typeof result === 'object') {
+      const record = result as Record<string, unknown>;
+      const encodedSummary = this.encodedRoomMetadataSummary([record]);
+      return `keys=${this.safeKeys(record).join(',') || 'none'}${encodedSummary ? ` encoded=${encodedSummary}` : ''}`;
+    }
+    if (typeof result === 'string') {
+      const buffers = this.protobufBuffersFromString(result);
+      return `string length ${result.length}${buffers.length ? ` decodedBytes=${buffers[0].length}` : ''}`;
+    }
+    return typeof result;
   }
 
   private tuyaDeviceMatches(device: Record<string, unknown>, deviceId: string): boolean {
