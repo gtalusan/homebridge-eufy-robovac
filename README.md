@@ -169,3 +169,6 @@ If you have `roomSwitches` configured, they are automatically mapped to Matter *
 2. Enable Matter in your Homebridge settings
 3. Run this plugin as a child bridge (recommended)
 4. The plugin will log `Matter is available and enabled.` on startup
+
+### Acknowledgements
+With thanks to https://github.com/martijnpoppen/ for his Homey plugin efforts which the Eufy Cloud integration borrows from.
