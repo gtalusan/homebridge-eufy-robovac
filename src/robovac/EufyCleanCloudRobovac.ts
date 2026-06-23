@@ -1127,7 +1127,12 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       const encodedSummary = this.encodedRoomMetadataSummary(metadata);
       this.emit(
         'info',
-        `Discovered Eufy room candidates: none found in startup metadata${encodedSummary ? `; encoded candidates inspected: ${encodedSummary}` : ''}`,
+        'Discovered Eufy room candidates: none found in startup metadata; '
+        + (
+          encodedSummary
+            ? `encoded protobuf candidates inspected: ${encodedSummary}`
+            : 'no encoded map/room protobuf payloads found'
+        ),
       );
     }
   }
@@ -1252,12 +1257,20 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   }
 
   private collectProtoRoomEntriesFromBuffer(buffer: Buffer, source: string, entries: Map<string, RoomLogEntry>): void {
+    const message = this.decodeAnyProtoMessage(buffer);
+    if (message) {
+      this.collectProtoRoomEntries(message, source, entries);
+    }
+  }
+
+  private decodeAnyProtoMessage(buffer: Buffer): ProtoMessage | undefined {
     for (const candidate of this.protoMessageCandidates(buffer)) {
       const message = this.decodeProtoMessage(candidate, 0);
       if (message) {
-        this.collectProtoRoomEntries(message, source, entries);
+        return message;
       }
     }
+    return undefined;
   }
 
   private protoMessageCandidates(buffer: Buffer): Buffer[] {
@@ -1446,8 +1459,12 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
 
     if (typeof value === 'string') {
       const buffers = this.protobufBuffersFromString(value);
-      if (buffers.length) {
-        candidates.push(`${path.join('.') || 'metadata'}(${buffers[0].length} bytes)`);
+      const buffer = buffers.find(candidate => {
+        const message = this.decodeAnyProtoMessage(candidate);
+        return message ? this.hasStructuredProtoContent(message) : false;
+      });
+      if (buffer) {
+        candidates.push(`${path.join('.') || 'metadata'}(${buffer.length} bytes)`);
       }
       return;
     }
@@ -1459,6 +1476,17 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
       this.collectEncodedMetadataSummary(child, [...path, key], candidates);
     }
+  }
+
+  private hasStructuredProtoContent(message: ProtoMessage): boolean {
+    for (const values of message.fields.values()) {
+      for (const value of values) {
+        if (value.text || value.child) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   private unwrapPayload(payload: Buffer): Buffer {

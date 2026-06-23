@@ -55,4 +55,21 @@ describe('EufyCleanCloudRobovac room discovery', () => {
       { id: '2', label: 'Hallway', source: 'dps.125' },
     ]);
   });
+
+  it('does not report ordinary ids as encoded protobuf candidates', () => {
+    const client = new EufyCleanCloudRobovac({});
+    const summary = (
+      client as unknown as {
+        encodedRoomMetadataSummary(value: unknown[]): string;
+      }
+    ).encodedRoomMetadataSummary([{
+      id: 'bf299237f6f8db6d73efhs',
+      room_id: '123456789012345678901234567',
+      dps: {
+        15: 'charge',
+      },
+    }]);
+
+    expect(summary).toBe('');
+  });
 });
