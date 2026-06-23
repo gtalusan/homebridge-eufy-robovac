@@ -7,63 +7,31 @@
     "properties": {
       "transport": {
         "title": "Connection Type",
-        "description": "Use Legacy Tuya for older local-control RoboVacs. Use Eufy Clean Cloud for newer cloud/MQTT models.",
+        "description": "Most newer Eufy vacs use Cloud connection (either Tuya or MQTT). Use Legacy Tuya for older local-control RoboVacs.",
         "type": "string",
-        "default": "legacy-tuya",
+        "default": "eufy-clean-cloud",
         "required": true,
         "oneOf": [
           {
-            "title": "Legacy Tuya 3.3 local control",
-            "enum": ["legacy-tuya"]
+            "title": "Eufy Clean Cloud/MQTT",
+            "enum": ["eufy-clean-cloud"]
           },
           {
-            "title": "Eufy Clean cloud/MQTT",
-            "enum": ["eufy-clean-cloud"]
+            "title": "Legacy Tuya 3.3 local control",
+            "enum": ["legacy-tuya"]
           }
         ]
       },
       "name": {
         "title": "Name",
-        "description": "Arbitrary name for your Eufy Robovac",
+        "description": "Nickname for your Eufy Robovac",
         "type": "string",
         "default": "Eufy Robovac",
         "required": true
       },
-      "ip": {
-        "title": "IP Address",
-        "description": "IP Address of your Eufy Robovac. Required for Legacy Tuya 3.3 local control.",
-        "type": "string",
-        "placeholder": "10.0.1.69",
-        "required": true,
-        "condition": {
-          "functionBody": "return !model.transport || model.transport === 'legacy-tuya';"
-        }
-      },
-      "deviceId": {
-        "title": "Device ID",
-        "description": "Required for legacy mode. Optional for cloud/MQTT mode when the Eufy Clean account has a single RoboVac; otherwise use the startup log to choose one.",
-        "type": "string"
-      },
-      "deviceModel": {
-        "title": "Eufy Clean Device Model",
-        "description": "Optional model code override for cloud/MQTT mode. The plugin normally discovers this from Eufy Clean.",
-        "type": "string",
-        "condition": {
-          "functionBody": "return model.transport === 'eufy-clean-cloud';"
-        }
-      },
-      "deviceKey": {
-        "title": "Tuya Device Key",
-        "description": "Tuya/Eufy Device/Local Key. Required for Legacy Tuya 3.3 local control.",
-        "type": "string",
-        "required": true,
-        "condition": {
-          "functionBody": "return !model.transport || model.transport === 'legacy-tuya';"
-        }
-      },
       "eufyEmail": {
         "title": "Eufy Clean Email",
-        "description": "Eufy Clean account email. Used only for Eufy Clean cloud/MQTT mode.",
+        "description": "Eufy Clean account email – the same as you use to log into your Eufy app.",
         "type": "string",
         "required": true,
         "condition": {
@@ -72,20 +40,17 @@
       },
       "eufyPassword": {
         "title": "Eufy Clean Password",
-        "description": "Eufy Clean account password. Used only for Eufy Clean cloud/MQTT mode when no access token is supplied.",
+        "description": "Eufy Clean account password.",
         "type": "string",
         "required": true,
         "condition": {
           "functionBody": "return model.transport === 'eufy-clean-cloud';"
         }
       },
-      "eufyAccessToken": {
-        "title": "Eufy Clean Access Token",
-        "description": "Optional Eufy Clean API access token. Username and password are still recommended so MQTT credentials can be discovered.",
-        "type": "string",
-        "condition": {
-          "functionBody": "return model.transport === 'eufy-clean-cloud';"
-        }
+      "deviceId": {
+        "title": "Device ID",
+        "description": "Required for legacy mode. Optional for cloud/MQTT mode when the Eufy Clean account has a single RoboVac; otherwise use the startup log to choose one.",
+        "type": "string"
       },
       "country": {
         "title": "Country",
@@ -202,6 +167,33 @@
         "type": "string",
         "condition": {
           "functionBody": "return model.transport === 'eufy-clean-cloud' && model.showAdvancedMqtt;"
+        }
+      },
+      "ip": {
+        "title": "IP Address",
+        "description": "IP Address of your Eufy Robovac. Required for Legacy Tuya 3.3 local control.",
+        "type": "string",
+        "placeholder": "10.0.1.69",
+        "required": true,
+        "condition": {
+          "functionBody": "return !model.transport || model.transport === 'legacy-tuya';"
+        }
+      },
+      "deviceModel": {
+        "title": "Eufy Clean Device Model",
+        "description": "Optional model code override for cloud/MQTT mode. The plugin normally discovers this from Eufy Clean.",
+        "type": "string",
+        "condition": {
+          "functionBody": "return model.transport === 'eufy-clean-cloud';"
+        }
+      },
+      "deviceKey": {
+        "title": "Tuya Device Key",
+        "description": "Tuya/Eufy Device/Local Key. Required for Legacy Tuya 3.3 local control.",
+        "type": "string",
+        "required": true,
+        "condition": {
+          "functionBody": "return !model.transport || model.transport === 'legacy-tuya';"
         }
       },
       "roomSwitches": {
