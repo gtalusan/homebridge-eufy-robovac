@@ -77,6 +77,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private readonly codec = new EufyCleanCodec();
   private accessToken?: string;
   private eufyUserId?: string;
+  private readonly eufyUserIds: string[] = [];
   private userCenterToken?: string;
   private gtoken?: string;
   private mqttUserId?: string;
@@ -252,6 +253,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       },
     ];
 
+    let firstToken: string | undefined;
     for (const loginConfig of configs) {
       const response = await fetch(loginConfig.url, {
         method: 'POST',
@@ -271,11 +273,21 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       const data = await response.json() as Record<string, unknown>;
       const token = this.findString(data, ['access_token', 'token', 'auth_token']);
       if (token) {
-        this.eufyUserId = this.findString(data, ['user_id', 'data.user_id', 'uid', 'data.uid', 'id', 'data.id', 'user.user_id']);
-        this.discoveryNotes.push(`login:${loginConfig.category}:ok user-id=${this.eufyUserId ? 'yes' : 'no'}`);
-        return token;
+        firstToken = firstToken ?? token;
+        const userId = this.findString(data, ['user_id', 'data.user_id', 'uid', 'data.uid', 'id', 'data.id', 'user.user_id']);
+        if (userId && !this.eufyUserIds.includes(userId)) {
+          this.eufyUserIds.push(userId);
+        }
+        this.discoveryNotes.push(`login:${loginConfig.category}:ok user-id=${userId ? 'yes' : 'no'} keys=${this.safeKeys(data).join(',')}`);
+        continue;
       }
       this.discoveryNotes.push(`login:${loginConfig.category}:missing-token keys=${this.safeKeys(data).join(',')}`);
+    }
+
+    if (firstToken) {
+      this.eufyUserId = this.eufyUserIds[0];
+      this.discoveryNotes.push(`login:user-id-candidates=${this.eufyUserIds.length}`);
+      return firstToken;
     }
 
     throw new Error('Eufy Clean login failed.');
@@ -477,7 +489,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   }
 
   private shouldUseTuyaCloud(deviceModel?: string): boolean {
-    if (!this.config.email || !this.config.password || !this.eufyUserId) {
+    if (!this.config.email || !this.config.password || this.eufyUserIds.length === 0) {
       return false;
     }
     const model = this.config.deviceModel ?? deviceModel;
@@ -487,19 +499,29 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private async openTuyaCloud(): Promise<void> {
     const regions = ['EU', 'US'];
     let lastError: unknown;
-    for (const region of regions) {
-      try {
-        this.tuyaRegion = region;
-        this.tuyaEndpoint = region === 'US' ? 'https://a1.tuyaus.com/api.json' : 'https://a1.tuyaeu.com/api.json';
-        this.tuyaSid = await this.tuyaLogin();
-        this.emit('debug', `Connected to Eufy/Tuya cloud command API in ${this.tuyaRegion}`);
-        return;
-      } catch (error) {
-        lastError = error;
-        this.emit('debug', `Eufy/Tuya cloud ${region} login failed: ${error instanceof Error ? error.message : String(error)}`);
+    for (const userId of this.eufyUserIds) {
+      this.eufyUserId = userId;
+      const userCandidate = this.eufyUserIds.indexOf(userId) + 1;
+      for (const region of regions) {
+        try {
+          this.tuyaRegion = region;
+          this.tuyaEndpoint = region === 'US' ? 'https://a1.tuyaus.com/api.json' : 'https://a1.tuyaeu.com/api.json';
+          this.tuyaSid = await this.tuyaLogin();
+          this.emit('debug', `Connected to Eufy/Tuya cloud command API in ${this.tuyaRegion} with user candidate ${userCandidate}`);
+          return;
+        } catch (error) {
+          lastError = error;
+          this.emit(
+            'debug',
+            `Eufy/Tuya cloud ${region} login failed for user candidate ${userCandidate}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
     }
-    throw new Error(`Eufy/Tuya cloud login failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+    throw new Error(
+      `Eufy/Tuya cloud login failed after ${this.eufyUserIds.length} user candidates. `
+      + `${lastError instanceof Error ? lastError.message : String(lastError)}. Discovery: ${this.discoveryNotes.join(' | ') || 'none'}`,
+    );
   }
 
   private async tuyaLogin(): Promise<string> {
