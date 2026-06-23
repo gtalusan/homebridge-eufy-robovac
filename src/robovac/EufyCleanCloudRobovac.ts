@@ -140,10 +140,11 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       await this.openTuyaCloud();
       const tuyaDevice = await this.getTuyaCloudDevice();
       const tuyaMapMetadata = await this.getTuyaMapMetadata(tuyaDevice);
+      const productDataPointMetadata = await this.getProductDataPointMetadata(this.config.deviceModel);
       this.connected = true;
       this.emit('tuya.connected');
       this.emit('cloud.connected');
-      this.logAvailableRooms(discoveredDevice?.raw, tuyaDevice, ...tuyaMapMetadata);
+      this.logAvailableRooms(discoveredDevice?.raw, tuyaDevice, ...tuyaMapMetadata, ...productDataPointMetadata);
       return;
     }
 
@@ -190,7 +191,8 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     this.connected = true;
     this.emit('tuya.connected');
     this.emit('cloud.connected');
-    this.logAvailableRooms(discoveredDevice?.raw);
+    const productDataPointMetadata = await this.getProductDataPointMetadata(this.config.deviceModel);
+    this.logAvailableRooms(discoveredDevice?.raw, ...productDataPointMetadata);
   }
 
   async connect(): Promise<void> {
@@ -518,6 +520,112 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       .filter((value): value is Record<string, unknown> => !!value);
     this.discoveryNotes.push(`fallback-device-list:count=${devices.length} keys=${this.safeKeys(data).join(',')}`);
     return devices;
+  }
+
+  private async getProductDataPointMetadata(deviceModel?: string): Promise<Record<string, unknown>[]> {
+    if (!deviceModel || !this.userCenterToken || !this.gtoken) {
+      return [];
+    }
+
+    try {
+      const response = await fetch(`${this.aiotApiBaseUrl()}/app/things/get_product_data_point`, {
+        method: 'POST',
+        headers: this.aiotHeaders(),
+        body: JSON.stringify({ code: deviceModel }),
+      });
+
+      if (!response.ok) {
+        this.emit('debug', `Eufy product data point probe failed with HTTP ${response.status}`);
+        return [];
+      }
+
+      const result = await response.json() as Record<string, unknown>;
+      const dataPoints = this.productDataPoints(result);
+      this.logProductDataPointSummary(deviceModel, dataPoints, result);
+      return [{ productDataPointProbe: result }];
+    } catch (error) {
+      this.emit('debug', `Eufy product data point probe failed: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  }
+
+  private productDataPoints(result: Record<string, unknown>): Record<string, unknown>[] {
+    return this.findArray(result, [
+      'data.data_point_list',
+      'data.dataPointList',
+      'data.datapoints',
+      'data.dp_list',
+      'data.dps',
+      'data.list',
+      'data',
+      'data_point_list',
+      'dataPointList',
+      'datapoints',
+      'dp_list',
+      'dps',
+      'list',
+    ])
+      .filter((value): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value));
+  }
+
+  private logProductDataPointSummary(
+    deviceModel: string,
+    dataPoints: Record<string, unknown>[],
+    result: Record<string, unknown>,
+  ): void {
+    if (!dataPoints.length) {
+      this.emit('info', `Eufy product data point probe for ${deviceModel} returned no data point list; keys=${this.safeKeys(result).join(',')}`);
+      return;
+    }
+
+    const interesting = dataPoints.filter(dataPoint => this.isInterestingDataPoint(dataPoint));
+    const rawOrString = dataPoints.filter(dataPoint => {
+      const type = this.dataPointType(dataPoint).toLowerCase();
+      return type.includes('raw') || type.includes('string');
+    });
+    this.emit(
+      'info',
+      `Eufy product data points for ${deviceModel}: total=${dataPoints.length}; `
+      + `map/room candidates=${this.formatDataPointSummary(interesting) || 'none'}; `
+      + `raw/string candidates=${this.formatDataPointSummary(rawOrString) || 'none'}`,
+    );
+  }
+
+  private isInterestingDataPoint(dataPoint: Record<string, unknown>): boolean {
+    const text = [
+      this.dataPointId(dataPoint),
+      this.dataPointCode(dataPoint),
+      this.dataPointType(dataPoint),
+      this.findString(dataPoint, ['name', 'label', 'desc', 'description']),
+    ]
+      .filter((value): value is string => !!value)
+      .join(' ')
+      .toLowerCase();
+    return /(map|room|scene|area|record|history|path|zone|raw|string)/.test(text);
+  }
+
+  private formatDataPointSummary(dataPoints: Record<string, unknown>[]): string {
+    return dataPoints
+      .slice(0, 24)
+      .map(dataPoint => {
+        const id = this.dataPointId(dataPoint) ?? '?';
+        const code = this.dataPointCode(dataPoint) ?? 'unknown';
+        const type = this.dataPointType(dataPoint) || 'unknown';
+        return `${id}:${code}/${type}`;
+      })
+      .join(', ');
+  }
+
+  private dataPointId(dataPoint: Record<string, unknown>): string | undefined {
+    return this.findString(dataPoint, ['dp_id', 'dpId', 'id', 'code_id', 'codeId']);
+  }
+
+  private dataPointCode(dataPoint: Record<string, unknown>): string | undefined {
+    return this.findString(dataPoint, ['code', 'dp_code', 'dpCode', 'identifier', 'name']);
+  }
+
+  private dataPointType(dataPoint: Record<string, unknown>): string {
+    return this.findString(dataPoint, ['data_type', 'dataType', 'type', 'property.type', 'schema.type']) ?? '';
   }
 
   private shouldUseTuyaCloud(deviceModel?: string): boolean {
