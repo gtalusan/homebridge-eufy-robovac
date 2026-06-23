@@ -35,6 +35,16 @@ interface RoomLogEntry {
   source: string;
 }
 
+interface ProtoFieldValue {
+  number?: number;
+  text?: string;
+  child?: ProtoMessage;
+}
+
+interface ProtoMessage {
+  fields: Map<number, ProtoFieldValue[]>;
+}
+
 const DEFAULT_API_BASE_URL = 'https://home-api.eufylife.com';
 const DEFAULT_EUFY_API_BASE_URL = 'https://api.eufylife.com';
 const DEFAULT_AIOT_API_BASE_URL = 'https://aiot-clean-api-pr.eufylife.com';
@@ -1114,7 +1124,11 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     if (discoveredRooms.length) {
       this.emit('info', `Discovered Eufy room candidates: ${this.formatRoomEntries(discoveredRooms)}`);
     } else {
-      this.emit('info', 'Discovered Eufy room candidates: none found in startup metadata');
+      const encodedSummary = this.encodedRoomMetadataSummary(metadata);
+      this.emit(
+        'info',
+        `Discovered Eufy room candidates: none found in startup metadata${encodedSummary ? `; encoded candidates inspected: ${encodedSummary}` : ''}`,
+      );
     }
   }
 
@@ -1133,6 +1147,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private discoveredRoomEntries(value: unknown): RoomLogEntry[] {
     const entries = new Map<string, RoomLogEntry>();
     this.collectRoomEntries(value, [], entries);
+    this.collectEncodedRoomEntries(value, [], entries, new Set<string>());
     return [...entries.values()];
   }
 
@@ -1166,10 +1181,284 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     }
   }
 
+  private collectEncodedRoomEntries(
+    value: unknown,
+    path: string[],
+    entries: Map<string, RoomLogEntry>,
+    seenStrings: Set<string>,
+  ): void {
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => this.collectEncodedRoomEntries(item, [...path, String(index)], entries, seenStrings));
+      return;
+    }
+
+    if (typeof value === 'string') {
+      if (seenStrings.has(value)) {
+        return;
+      }
+      seenStrings.add(value);
+      this.collectJsonRoomEntries(value, path, entries, seenStrings);
+      for (const buffer of this.protobufBuffersFromString(value)) {
+        this.collectProtoRoomEntriesFromBuffer(buffer, path.join('.') || 'metadata', entries);
+      }
+      return;
+    }
+
+    if (!value || typeof value !== 'object') {
+      return;
+    }
+
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      this.collectEncodedRoomEntries(child, [...path, key], entries, seenStrings);
+    }
+  }
+
+  private collectJsonRoomEntries(
+    value: string,
+    path: string[],
+    entries: Map<string, RoomLogEntry>,
+    seenStrings: Set<string>,
+  ): void {
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      this.collectRoomEntries(parsed, [...path, 'json'], entries);
+      this.collectEncodedRoomEntries(parsed, [...path, 'json'], entries, seenStrings);
+    } catch {
+      // Not JSON; many DPS string values are ordinary modes or protobuf payloads.
+    }
+  }
+
+  private protobufBuffersFromString(value: string): Buffer[] {
+    const trimmed = value.trim();
+    if (trimmed.length < 8 || trimmed.length > 65536 || !/^[A-Za-z0-9+/=_-]+$/.test(trimmed)) {
+      return [];
+    }
+
+    const normalized = trimmed.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(normalized.length + ((4 - normalized.length % 4) % 4), '=');
+    try {
+      const decoded = Buffer.from(padded, 'base64');
+      if (decoded.length < 3) {
+        return [];
+      }
+      return [decoded];
+    } catch {
+      return [];
+    }
+  }
+
+  private collectProtoRoomEntriesFromBuffer(buffer: Buffer, source: string, entries: Map<string, RoomLogEntry>): void {
+    for (const candidate of this.protoMessageCandidates(buffer)) {
+      const message = this.decodeProtoMessage(candidate, 0);
+      if (message) {
+        this.collectProtoRoomEntries(message, source, entries);
+      }
+    }
+  }
+
+  private protoMessageCandidates(buffer: Buffer): Buffer[] {
+    const candidates = [buffer];
+    const delimited = this.readProtoVarint(buffer, 0);
+    if (delimited && delimited.value > 0 && delimited.offset + delimited.value === buffer.length) {
+      candidates.push(buffer.subarray(delimited.offset));
+    }
+    return candidates;
+  }
+
+  private decodeProtoMessage(buffer: Buffer, depth: number): ProtoMessage | undefined {
+    if (depth > 8 || buffer.length === 0) {
+      return undefined;
+    }
+
+    const fields = new Map<number, ProtoFieldValue[]>();
+    let offset = 0;
+    while (offset < buffer.length) {
+      const tag = this.readProtoVarint(buffer, offset);
+      if (!tag || tag.value === 0) {
+        return undefined;
+      }
+      offset = tag.offset;
+      const fieldNumber = tag.value >>> 3;
+      const wireType = tag.value & 0x07;
+      if (fieldNumber <= 0) {
+        return undefined;
+      }
+
+      const values = fields.get(fieldNumber) ?? [];
+      switch (wireType) {
+      case 0: {
+        const value = this.readProtoVarint(buffer, offset);
+        if (!value) {
+          return undefined;
+        }
+        offset = value.offset;
+        values.push({ number: value.value });
+        break;
+      }
+      case 1:
+        if (offset + 8 > buffer.length) {
+          return undefined;
+        }
+        offset += 8;
+        values.push({});
+        break;
+      case 2: {
+        const length = this.readProtoVarint(buffer, offset);
+        if (!length || length.offset + length.value > buffer.length) {
+          return undefined;
+        }
+        offset = length.offset;
+        const bytes = buffer.subarray(offset, offset + length.value);
+        offset += length.value;
+        values.push({
+          text: this.printableProtoText(bytes),
+          child: this.decodeProtoMessage(bytes, depth + 1),
+        });
+        break;
+      }
+      case 5:
+        if (offset + 4 > buffer.length) {
+          return undefined;
+        }
+        offset += 4;
+        values.push({});
+        break;
+      default:
+        return undefined;
+      }
+      fields.set(fieldNumber, values);
+    }
+
+    return fields.size ? { fields } : undefined;
+  }
+
+  private collectProtoRoomEntries(message: ProtoMessage, source: string, entries: Map<string, RoomLogEntry>): void {
+    const id = this.protoNumber(message, 1);
+    const label = this.protoText(message, 2) ?? this.protoRoomSceneLabel(message);
+    if (id !== undefined && label) {
+      entries.set(`${id}:${label}`, {
+        id: String(id),
+        label,
+        source,
+      });
+    }
+
+    for (const values of message.fields.values()) {
+      for (const value of values) {
+        if (value.child) {
+          this.collectProtoRoomEntries(value.child, source, entries);
+        }
+      }
+    }
+  }
+
+  private protoRoomSceneLabel(message: ProtoMessage): string | undefined {
+    const scene = message.fields.get(4)?.find(value => value.child)?.child;
+    if (!scene) {
+      return undefined;
+    }
+
+    const type = this.protoNumber(scene, 1);
+    const indexMessage = scene.fields.get(2)?.find(value => value.child)?.child;
+    const index = indexMessage ? this.protoNumber(indexMessage, 1) : undefined;
+    if (!type) {
+      return undefined;
+    }
+
+    const roomTypes: Record<number, string> = {
+      1: 'Study',
+      2: 'Bedroom',
+      3: 'Restroom',
+      4: 'Kitchen',
+      5: 'Living Room',
+      6: 'Dining Room',
+      7: 'Corridor',
+    };
+    return `${roomTypes[type] ?? 'Room'}${index ? ` ${index}` : ''}`;
+  }
+
+  private protoNumber(message: ProtoMessage, field: number): number | undefined {
+    return message.fields.get(field)?.find(value => typeof value.number === 'number')?.number;
+  }
+
+  private protoText(message: ProtoMessage, field: number): string | undefined {
+    return message.fields.get(field)
+      ?.map(value => value.text?.trim())
+      .find((value): value is string => !!value);
+  }
+
+  private readProtoVarint(buffer: Buffer, offset: number): { value: number; offset: number } | undefined {
+    let value = 0;
+    let shift = 0;
+    let cursor = offset;
+    while (cursor < buffer.length && shift <= 28) {
+      const byte = buffer[cursor++];
+      value += (byte & 0x7f) * 2 ** shift;
+      if ((byte & 0x80) === 0) {
+        return { value, offset: cursor };
+      }
+      shift += 7;
+    }
+    return undefined;
+  }
+
+  private printableProtoText(buffer: Buffer): string | undefined {
+    if (!buffer.length) {
+      return undefined;
+    }
+    const text = buffer.toString('utf8');
+    if (Buffer.from(text, 'utf8').length !== buffer.length) {
+      return undefined;
+    }
+    if (!/^[\p{L}\p{N}\p{P}\p{S}\p{Zs}\t -]+$/u.test(text)) {
+      return undefined;
+    }
+    return text;
+  }
+
   private formatRoomEntries(entries: RoomLogEntry[]): string {
     return entries
       .map(entry => `${entry.id}="${entry.label}" (${entry.source})`)
       .join(', ');
+  }
+
+  private encodedRoomMetadataSummary(metadata: Array<Record<string, unknown> | undefined>): string {
+    const candidates: string[] = [];
+    for (const value of metadata) {
+      this.collectEncodedMetadataSummary(value, [], candidates);
+    }
+    return candidates.slice(0, 12).join(', ');
+  }
+
+  private collectEncodedMetadataSummary(value: unknown, path: string[], candidates: string[]): void {
+    if (candidates.length >= 12) {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => this.collectEncodedMetadataSummary(item, [...path, String(index)], candidates));
+      return;
+    }
+
+    if (typeof value === 'string') {
+      const buffers = this.protobufBuffersFromString(value);
+      if (buffers.length) {
+        candidates.push(`${path.join('.') || 'metadata'}(${buffers[0].length} bytes)`);
+      }
+      return;
+    }
+
+    if (!value || typeof value !== 'object') {
+      return;
+    }
+
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      this.collectEncodedMetadataSummary(child, [...path, key], candidates);
+    }
   }
 
   private unwrapPayload(payload: Buffer): Buffer {
