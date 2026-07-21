@@ -743,7 +743,7 @@ describe('EufyRobovacMatterAccessory', () => {
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
       accessory.setMatterReady();
 
-      robovac.emit('event', { command: 'error', value: 'stuck_wheel' });
+      robovac.emit('event', { command: 'error', value: 'Wheel_stuck' });
 
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
         accessory.UUID, 'rvcOperationalState', { operationalState: 3 }, undefined,

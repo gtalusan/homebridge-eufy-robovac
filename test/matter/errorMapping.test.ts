@@ -10,9 +10,9 @@ import {
 
 describe('Error Code Mapping', () => {
   describe('EUFY_TO_MATTER_ERROR_MAP', () => {
-    it('should contain 26 error code entries (21 device errors + 5 string variants)', () => {
+    it('should contain 27 error code entries (21 device errors + 6 string variants)', () => {
       const entries = Object.keys(EUFY_TO_MATTER_ERROR_MAP);
-      expect(entries.length).toBe(26);
+      expect(entries.length).toBe(27);
     });
 
     it('should have numeric codes 0, 1-7, 8-9, 12-14, 17-21', () => {
@@ -26,7 +26,7 @@ describe('Error Code Mapping', () => {
     it('should have string codes (Wheel_stuck, R_brush_stuck, etc.)', () => {
       const stringCodes = [
         'Wheel_stuck', 'R_brush_stuck', 'Crash_bar_stuck', 'sensor_dirty',
-        'N_enough_pow', 'Stuck_5_min', 'Fan_stuck', 'S_brush_stuck',
+        'N_enough_pow', 'Stuck_5_min', 'Fan_stuck', 'S_brush_stuck', 'no_error',
       ];
       stringCodes.forEach(code => {
         expect(EUFY_TO_MATTER_ERROR_MAP).toHaveProperty(code);

@@ -50,6 +50,6 @@
     "vitest": "^4.1.4"
   },
   "dependencies": {
-    "@george.talusan/eufy-robovac-js": "^0.0.13"
+    "@george.talusan/eufy-robovac-js": "^0.0.14"
   }
 }

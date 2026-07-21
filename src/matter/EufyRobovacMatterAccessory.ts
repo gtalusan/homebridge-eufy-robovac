@@ -7,6 +7,7 @@ import {
   mapEufyErrorToMatterErrorState,
   getEufyErrorDescription,
   getMatterErrorStateName,
+  MatterErrorState,
 } from './errorMapping.js';
 
 interface RobovacEvent {
@@ -389,7 +390,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
         }
       } else if (event.command === 'error') {
         const errorValue = event.value as string;
-        if (errorValue && errorValue !== 'no error') {
+        if (errorValue && mapEufyErrorToMatterErrorState(errorValue) !== MatterErrorState.NoError) {
           this.logWarn(`device error reported: ${errorValue}`);
           this.updateErrorState(errorValue).catch(e => this.logError('Failed to update error state:', e));
           this.updateOperationalState(OP_ERROR).catch(e => this.logError('Failed to update operational state:', e));
@@ -441,7 +442,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     }
     try {
       const error = this.robovac.error();
-      if (error && error !== 'no error') {
+      if (error && mapEufyErrorToMatterErrorState(error) !== MatterErrorState.NoError) {
         this.logWarn(`device error: ${error}`);
         this.updateErrorState(error).catch(e => this.logError('Failed to update error state:', e));
         this.updateOperationalState(OP_ERROR);
