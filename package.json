@@ -2,7 +2,7 @@
   "name": "@george.talusan/homebridge-eufy-robovac",
   "displayName": "Homebridge Plugin for Eufy Robovac",
   "type": "module",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Homebridge Plugin for Eufy Robovac",
   "author": "George Talusan <george.talusan@gmail.com>",
   "license": "ISC",
