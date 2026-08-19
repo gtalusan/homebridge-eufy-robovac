@@ -373,12 +373,6 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
           this.logInfo('goHome flag cleared — syncing state');
           this.syncState();
         }
-      } else if (event.command === 'coverage') {
-        if ((event.value as number) > 0 && this.currentOperationalState !== OP_RUNNING) {
-          this.logInfo(`coverage event received (${event.value}) — inferring Running state`);
-          this.updateOperationalState(OP_RUNNING).catch(e => this.logError('Failed to update state:', e));
-          this.updateRunMode(RUN_CLEANING).catch(e => this.logError('Failed to update state:', e));
-        }
       } else if (event.command === 'playPause') {
         if (event.value === false) {
           this.updateOperationalState(OP_PAUSED).catch(e => this.logError('Failed to update state:', e));
