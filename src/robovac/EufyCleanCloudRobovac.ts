@@ -34,6 +34,9 @@ const DEFAULT_API_BASE_URL = 'https://home-api.eufylife.com';
 const DEFAULT_EUFY_API_BASE_URL = 'https://api.eufylife.com';
 const DEFAULT_AIOT_API_BASE_URL = 'https://aiot-clean-api-pr.eufylife.com';
 const DEFAULT_MQTT_PORT = 8883;
+const TUYA_ACTIVE_POLL_INTERVAL_MS = 15_000;
+const TUYA_IDLE_POLL_INTERVAL_MS = 60_000;
+const TUYA_COMMAND_VERIFICATION_DELAYS_MS = [3_000, 8_000, 15_000] as const;
 const USER_AGENT = 'EufyHome-Android-3.1.3-753';
 const TUYA_APP_KEY = 'yx5v9uc3ef9wg3v9atje';
 const TUYA_APP_SECRET = 's8x78u7xwymasd9kqa7a73pjhxqsedaj';
@@ -101,6 +104,11 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   private tuyaEndpoint = 'https://a1.tuyaeu.com/api.json';
   private tuyaRegion = 'EU';
   private readonly tuyaDeviceId = randomBytes(22).toString('hex');
+  private tuyaPollTimer?: NodeJS.Timeout;
+  private tuyaRefreshInFlight?: Promise<void>;
+  private tuyaPollFailures = 0;
+  private tuyaDpsKeysLogged = false;
+  private readonly tuyaVerificationTimers = new Set<NodeJS.Timeout>();
 
   constructor(private readonly config: EufyCleanConfig) {
     super();
@@ -123,10 +131,14 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       this.config.deviceId = this.config.deviceId ?? discoveredDevice?.id;
       this.deviceId = this.config.deviceId;
       await this.openTuyaCloud();
-      await this.getTuyaCloudDevice();
+      const device = await this.getTuyaCloudDevice();
+      if (device) {
+        this.applyTuyaCloudState(device);
+      }
       this.connected = true;
       this.emit('tuya.connected');
       this.emit('cloud.connected');
+      this.scheduleTuyaPoll();
       return;
     }
 
@@ -180,12 +192,27 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   }
 
   async disconnect(): Promise<void> {
+    this.clearTuyaTimers();
     this.mqttClient?.end();
     this.mqttClient = undefined;
     this.tuyaSid = undefined;
     this.connected = false;
     this.emit('tuya.disconnected');
     this.emit('cloud.disconnected');
+  }
+
+  async refresh(): Promise<void> {
+    if (this.commandTransport !== 'tuya-cloud') {
+      return;
+    }
+    if (!this.tuyaRefreshInFlight) {
+      this.tuyaRefreshInFlight = this.refreshTuyaCloudState()
+        .finally(() => {
+          this.tuyaRefreshInFlight = undefined;
+        });
+    }
+    await this.tuyaRefreshInFlight;
+    this.scheduleTuyaPoll();
   }
 
   async clean(): Promise<void> {
@@ -246,7 +273,8 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   }
 
   error(): string | number {
-    return this.stringState('error', 'no error');
+    const value = this.dps.error;
+    return typeof value === 'string' || typeof value === 'number' ? value : 'no error';
   }
 
   private async login(): Promise<string> {
@@ -652,7 +680,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     return data.result as T;
   }
 
-  private async getTuyaCloudDevice(): Promise<Record<string, unknown> | undefined> {
+  private async getTuyaCloudDevice(throwOnError = false): Promise<Record<string, unknown> | undefined> {
     const deviceId = this.config.deviceId;
     if (!deviceId) {
       this.emit('debug', 'Skipping Eufy/Tuya cloud device metadata fetch because no deviceId is available yet.');
@@ -676,7 +704,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
           this.emit('debug', `Fetched Eufy/Tuya cloud device metadata with keys: ${this.safeKeys(device).join(',')}`);
           const dps = this.asRecord(device.dps);
           if (dps) {
-            this.emit('info', `Eufy/Tuya cloud DPS keys: ${Object.keys(dps).sort().join(', ')}`);
+            this.logTuyaDpsKeys(dps);
           }
           return device;
         }
@@ -687,7 +715,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
         this.emit('info', 'Using the only Eufy/Tuya cloud device metadata record found.');
         const dps = this.asRecord(device.dps);
         if (dps) {
-          this.emit('info', `Eufy/Tuya cloud DPS keys: ${Object.keys(dps).sort().join(', ')}`);
+          this.logTuyaDpsKeys(dps);
         }
         return device;
       }
@@ -699,8 +727,135 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       }
     } catch (error) {
       this.emit('debug', `Could not fetch Eufy/Tuya cloud device metadata: ${error instanceof Error ? error.message : String(error)}`);
+      if (throwOnError) {
+        throw error;
+      }
     }
     return undefined;
+  }
+
+  private logTuyaDpsKeys(dps: Record<string, unknown>): void {
+    if (this.tuyaDpsKeysLogged) {
+      return;
+    }
+    this.tuyaDpsKeysLogged = true;
+    this.emit('info', `Eufy/Tuya cloud DPS keys: ${Object.keys(dps).sort().join(', ')}`);
+  }
+
+  private async refreshTuyaCloudState(): Promise<void> {
+    const device = await this.getTuyaCloudDevice(true);
+    if (!device) {
+      throw new Error('Eufy/Tuya cloud refresh did not return the configured device.');
+    }
+    this.applyTuyaCloudState(device);
+  }
+
+  private applyTuyaCloudState(device: Record<string, unknown>): void {
+    const rawDps = this.asRecord(device.dps);
+    if (!rawDps) {
+      this.emit('debug', 'Eufy/Tuya cloud refresh returned no DPS state.');
+      return;
+    }
+
+    const mappings: Record<string, string> = {
+      [LEGACY_DPS.PLAY_PAUSE]: 'playPause',
+      [LEGACY_DPS.WORK_MODE]: 'workMode',
+      '15': 'activity',
+      [LEGACY_DPS.GO_HOME]: 'goHome',
+      [LEGACY_DPS.CLEAN_SPEED]: 'cleanSpeed',
+      [LEGACY_DPS.FIND_ROBOT]: 'locate',
+      [LEGACY_DPS.BATTERY_LEVEL]: 'battery',
+      [LEGACY_DPS.ERROR_CODE]: 'error',
+      '109': 'runtime',
+      '110': 'coverage',
+    };
+    const normalized: Record<string, unknown> = {};
+    for (const [dpsKey, stateKey] of Object.entries(mappings)) {
+      if (Object.hasOwn(rawDps, dpsKey)) {
+        normalized[stateKey] = rawDps[dpsKey];
+      }
+    }
+
+    this.emit('debug', `Refreshed Eufy/Tuya cloud state with DPS keys: ${Object.keys(rawDps).sort().join(', ')}`);
+    this.setState({ ...rawDps, ...normalized });
+  }
+
+  private scheduleTuyaPoll(delay = this.tuyaPollInterval()): void {
+    if (this.commandTransport !== 'tuya-cloud' || !this.connected) {
+      return;
+    }
+    if (this.tuyaPollTimer) {
+      clearTimeout(this.tuyaPollTimer);
+    }
+    this.tuyaPollTimer = setTimeout(() => {
+      this.tuyaPollTimer = undefined;
+      this.pollTuyaCloud().catch(error => {
+        this.emit('debug', `Unexpected Eufy/Tuya cloud polling error: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }, delay);
+    this.tuyaPollTimer.unref();
+  }
+
+  private async pollTuyaCloud(): Promise<void> {
+    try {
+      await this.refresh();
+      this.tuyaPollFailures = 0;
+    } catch (error) {
+      this.tuyaPollFailures += 1;
+      this.emit(
+        'debug',
+        `Eufy/Tuya cloud state refresh failed (${this.tuyaPollFailures}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+      if (this.tuyaPollFailures >= 3) {
+        this.emit('info', 'Eufy/Tuya cloud state is stale; renewing the cloud session.');
+        try {
+          await this.openTuyaCloud();
+          await this.refresh();
+          this.tuyaPollFailures = 0;
+        } catch (renewError) {
+          this.emit('debug', `Eufy/Tuya cloud session renewal failed: ${renewError instanceof Error ? renewError.message : String(renewError)}`);
+        }
+      }
+    } finally {
+      this.scheduleTuyaPoll();
+    }
+  }
+
+  private tuyaPollInterval(): number {
+    const activity = this.activity();
+    return activity === 'Sleeping' || activity === 'Charging' || activity === 'completed'
+      ? TUYA_IDLE_POLL_INTERVAL_MS
+      : TUYA_ACTIVE_POLL_INTERVAL_MS;
+  }
+
+  private scheduleTuyaCommandVerification(command: CloudCommand): void {
+    for (const timer of this.tuyaVerificationTimers) {
+      clearTimeout(timer);
+    }
+    this.tuyaVerificationTimers.clear();
+
+    for (const delay of TUYA_COMMAND_VERIFICATION_DELAYS_MS) {
+      const timer = setTimeout(() => {
+        this.tuyaVerificationTimers.delete(timer);
+        this.emit('debug', `Verifying Eufy/Tuya cloud ${command} command after ${delay / 1000}s.`);
+        this.refresh().catch(error => {
+          this.emit('debug', `Eufy/Tuya cloud command verification failed: ${error instanceof Error ? error.message : String(error)}`);
+        });
+      }, delay);
+      timer.unref();
+      this.tuyaVerificationTimers.add(timer);
+    }
+  }
+
+  private clearTuyaTimers(): void {
+    if (this.tuyaPollTimer) {
+      clearTimeout(this.tuyaPollTimer);
+      this.tuyaPollTimer = undefined;
+    }
+    for (const timer of this.tuyaVerificationTimers) {
+      clearTimeout(timer);
+    }
+    this.tuyaVerificationTimers.clear();
   }
 
   private tuyaDeviceMatches(device: Record<string, unknown>, deviceId: string): boolean {
@@ -871,6 +1026,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
         );
         await this.sendTuyaCloudCommand(dataPayload);
       }
+      this.scheduleTuyaCommandVerification(command);
       return;
     }
 

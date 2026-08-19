@@ -13,6 +13,7 @@ export interface RobovacClient extends EventEmitter {
   initialize(): Promise<void>;
   connect(): Promise<void>;
   disconnect?(): Promise<void>;
+  refresh?(): Promise<void>;
 
   clean(): Promise<void>;
   pause(): Promise<void>;
