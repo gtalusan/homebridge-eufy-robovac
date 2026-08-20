@@ -56,11 +56,18 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
           this.log.info('Connected to Eufy Clean cloud');
         });
         this.robovac.on('tuya.disconnected', () => {
-          this.log.info('Disconnected. Attempting reconnect...');
+          const wasConnected = this.connected;
           this.connected = false;
+          if (this.robovac.reconnectsAutomatically) {
+            if (wasConnected) {
+              this.log.info('Disconnected. Waiting for transport reconnect...');
+            }
+            return;
+          }
           if (this.reconnecting) {
             return;
           }
+          this.log.info('Disconnected. Attempting reconnect...');
           this.reconnecting = true;
           const id = setInterval(async () => {
             try {
@@ -73,11 +80,18 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
           }, 2000);
         });
         this.robovac.on('cloud.disconnected', () => {
-          this.log.info('Eufy Clean cloud disconnected. Attempting reconnect...');
+          const wasConnected = this.connected;
           this.connected = false;
+          if (this.robovac.reconnectsAutomatically) {
+            if (wasConnected) {
+              this.log.info('Eufy Clean cloud disconnected. Waiting for MQTT reconnect...');
+            }
+            return;
+          }
           if (this.reconnecting) {
             return;
           }
+          this.log.info('Eufy Clean cloud disconnected. Attempting reconnect...');
           this.reconnecting = true;
           const id = setInterval(async () => {
             try {

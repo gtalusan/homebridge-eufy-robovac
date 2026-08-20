@@ -229,5 +229,18 @@ describe('EufyRobovacHomebridgePlatform', () => {
       expect(api.matter.registerPlatformAccessories).toHaveBeenCalled();
       expect(api.registerPlatformAccessories).toHaveBeenCalled();
     });
+
+    it('should let an automatically reconnecting transport own its reconnect loop', async () => {
+      const platform = new EufyRobovacHomebridgePlatform(log, config, api);
+      await api._triggerDidFinishLaunching();
+      platform.robovac.reconnectsAutomatically = true;
+      platform.connected = true;
+
+      platform.robovac.emit('tuya.disconnected');
+
+      expect(platform.connected).toBe(false);
+      expect(platform.robovac.connect).not.toHaveBeenCalled();
+      expect(log.info).toHaveBeenCalledWith('Disconnected. Waiting for transport reconnect...');
+    });
   });
 });

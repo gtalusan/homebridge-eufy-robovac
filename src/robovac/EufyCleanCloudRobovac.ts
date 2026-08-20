@@ -34,6 +34,11 @@ const DEFAULT_API_BASE_URL = 'https://home-api.eufylife.com';
 const DEFAULT_EUFY_API_BASE_URL = 'https://api.eufylife.com';
 const DEFAULT_AIOT_API_BASE_URL = 'https://aiot-clean-api-pr.eufylife.com';
 const DEFAULT_MQTT_PORT = 8883;
+const MQTT_KEEPALIVE_SECONDS = 30;
+const MQTT_RECONNECT_PERIOD_MS = 5_000;
+const MQTT_WATCHDOG_INTERVAL_MS = 15_000;
+const MQTT_COMMAND_STATUS_TIMEOUT_MS = 45_000;
+const MQTT_ACTIVE_STATUS_TIMEOUT_MS = 5 * 60_000;
 const TUYA_ACTIVE_POLL_INTERVAL_MS = 15_000;
 const TUYA_IDLE_POLL_INTERVAL_MS = 60_000;
 const TUYA_COMMAND_VERIFICATION_DELAYS_MS = [3_000, 8_000, 15_000] as const;
@@ -84,10 +89,17 @@ const NOVEL_MODEL_PREFIXES = new Set(['T2080', 'T2351', 'T2352', 'T2353']);
 
 export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient {
   public connected = false;
+  public reconnectsAutomatically = false;
   public deviceId?: string;
   public dps: Record<string, unknown> = {};
 
   private mqttClient?: MqttClient;
+  private mqttWatchdogTimer?: NodeJS.Timeout;
+  private mqttLastStatusAt?: number;
+  private mqttPendingStatusSince?: number;
+  private mqttSubscribedTopicCount = 0;
+  private mqttReconnectInProgress = false;
+  private mqttDisconnecting = false;
   private readonly codec = new EufyCleanCodec();
   private accessToken?: string;
   private eufyUserId?: string;
@@ -161,30 +173,14 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       throw new Error('Eufy Clean cloud could not discover a RoboVac device.');
     }
 
+    this.reconnectsAutomatically = true;
+    this.mqttDisconnecting = false;
     await this.openMqtt(mqtt.host, mqtt.port ?? DEFAULT_MQTT_PORT, mqtt.clientId, mqtt.username, mqtt.password, mqtt.certificatePem, mqtt.privateKey);
-    const subscribedTopics: string[] = [];
-    const rejectedTopics: string[] = [];
-    for (const topic of this.statusTopics(mqtt)) {
-      try {
-        await this.subscribe(topic, mqtt.qos ?? 0);
-        subscribedTopics.push(topic);
-      } catch (error) {
-        rejectedTopics.push(topic);
-        const message = error instanceof Error ? error.message : String(error);
-        this.emit('debug', message);
-      }
-    }
-    if (!subscribedTopics.length) {
-      this.emit(
-        'debug',
-        `Eufy Clean MQTT rejected all status topics; continuing in command-only mode: ${rejectedTopics.join(', ')}`,
-      );
-    } else if (rejectedTopics.length) {
-      this.emit('debug', `Eufy Clean MQTT will continue with subscribed status topics: ${subscribedTopics.join(', ')}`);
-    }
+    await this.subscribeConfiguredMqttTopics();
     this.connected = true;
     this.emit('tuya.connected');
     this.emit('cloud.connected');
+    this.startMqttWatchdog();
   }
 
   async connect(): Promise<void> {
@@ -193,6 +189,9 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
 
   async disconnect(): Promise<void> {
     this.clearTuyaTimers();
+    this.clearMqttWatchdog();
+    this.mqttDisconnecting = true;
+    this.reconnectsAutomatically = false;
     this.mqttClient?.end();
     this.mqttClient = undefined;
     this.tuyaSid = undefined;
@@ -965,35 +964,59 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     privateKey?: string,
   ): Promise<void> {
     await new Promise<void>((resolve, reject) => {
+      let initiallyConnected = false;
       const client = mqtt.connect(`mqtts://${host}:${port}`, {
         clientId,
         username,
         password,
         cert: certificatePem ? Buffer.from(certificatePem, 'utf8') : undefined,
         key: privateKey ? Buffer.from(privateKey, 'utf8') : undefined,
-        reconnectPeriod: 0,
+        keepalive: MQTT_KEEPALIVE_SECONDS,
+        reconnectPeriod: MQTT_RECONNECT_PERIOD_MS,
+        resubscribe: false,
         protocolVersion: 4,
       });
 
       const fail = (error: Error) => {
+        this.mqttDisconnecting = true;
         client.end(true);
         reject(error);
       };
 
       client.once('error', fail);
-      client.once('connect', () => {
-        client.off('error', fail);
+      client.on('connect', () => {
         this.emit('debug', 'Eufy Clean MQTT CONNACK accepted');
         this.mqttClient = client;
-        resolve();
+        this.mqttReconnectInProgress = false;
+        if (!initiallyConnected) {
+          initiallyConnected = true;
+          client.off('error', fail);
+          client.on('error', error => {
+            this.emit('debug', `Eufy Clean MQTT client error: ${error.message}`);
+          });
+          resolve();
+          return;
+        }
+        this.restoreMqttConnection().catch(error => {
+          this.emit('debug', `Eufy Clean MQTT resubscription failed: ${error instanceof Error ? error.message : String(error)}`);
+        });
       });
       client.on('message', (topic, payload) => {
         this.handlePublish(topic, Buffer.isBuffer(payload) ? payload : Buffer.from(payload));
       });
+      client.on('reconnect', () => {
+        this.emit('debug', 'Eufy Clean MQTT reconnecting');
+      });
       client.on('close', () => {
+        if (!initiallyConnected || this.mqttDisconnecting) {
+          return;
+        }
+        const wasConnected = this.connected;
         this.connected = false;
-        this.emit('tuya.disconnected');
-        this.emit('cloud.disconnected');
+        if (wasConnected) {
+          this.emit('tuya.disconnected');
+          this.emit('cloud.disconnected');
+        }
       });
     });
   }
@@ -1013,6 +1036,91 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       throw new Error(`Eufy Clean MQTT subscription rejected for ${topic}.`);
     }
     this.emit('debug', `Subscribed to Eufy Clean MQTT topic ${topic} with QoS ${subscription.qos}`);
+  }
+
+  private async subscribeConfiguredMqttTopics(): Promise<void> {
+    const mqttConfig = this.config.mqtt;
+    const subscribedTopics: string[] = [];
+    const rejectedTopics: string[] = [];
+    for (const topic of this.statusTopics(mqttConfig)) {
+      try {
+        await this.subscribe(topic, mqttConfig?.qos ?? 0);
+        subscribedTopics.push(topic);
+      } catch (error) {
+        rejectedTopics.push(topic);
+        this.emit('debug', error instanceof Error ? error.message : String(error));
+      }
+    }
+    this.mqttSubscribedTopicCount = subscribedTopics.length;
+    if (!subscribedTopics.length) {
+      this.emit(
+        'debug',
+        `Eufy Clean MQTT rejected all status topics; continuing in command-only mode: ${rejectedTopics.join(', ')}`,
+      );
+    } else if (rejectedTopics.length) {
+      this.emit('debug', `Eufy Clean MQTT will continue with subscribed status topics: ${subscribedTopics.join(', ')}`);
+    }
+  }
+
+  private async restoreMqttConnection(): Promise<void> {
+    await this.subscribeConfiguredMqttTopics();
+    this.connected = true;
+    this.mqttPendingStatusSince = undefined;
+    this.mqttLastStatusAt = Date.now();
+    this.startMqttWatchdog();
+    this.emit('debug', 'Eufy Clean MQTT connection restored and status topics resubscribed');
+    this.emit('tuya.connected');
+    this.emit('cloud.connected');
+  }
+
+  private startMqttWatchdog(): void {
+    this.clearMqttWatchdog();
+    this.mqttWatchdogTimer = setInterval(() => this.checkMqttStaleness(), MQTT_WATCHDOG_INTERVAL_MS);
+    this.mqttWatchdogTimer.unref();
+  }
+
+  private clearMqttWatchdog(): void {
+    if (this.mqttWatchdogTimer) {
+      clearInterval(this.mqttWatchdogTimer);
+      this.mqttWatchdogTimer = undefined;
+    }
+  }
+
+  private checkMqttStaleness(now = Date.now()): void {
+    if (!this.connected || this.mqttSubscribedTopicCount === 0) {
+      return;
+    }
+
+    if (this.mqttPendingStatusSince && now - this.mqttPendingStatusSince >= MQTT_COMMAND_STATUS_TIMEOUT_MS) {
+      this.requestMqttReconnect('no status received after command');
+      return;
+    }
+
+    if (this.mqttLastStatusAt
+      && this.mqttActivityIsActive()
+      && now - this.mqttLastStatusAt >= MQTT_ACTIVE_STATUS_TIMEOUT_MS) {
+      this.requestMqttReconnect('status stream stale while RoboVac is active');
+    }
+  }
+
+  private mqttActivityIsActive(): boolean {
+    const activity = this.activity();
+    return activity !== 'Sleeping' && activity !== 'Charging' && activity !== 'completed';
+  }
+
+  private requestMqttReconnect(reason: string): void {
+    if (!this.mqttClient || this.mqttReconnectInProgress) {
+      return;
+    }
+    this.mqttReconnectInProgress = true;
+    this.mqttPendingStatusSince = undefined;
+    this.emit('info', `Eufy Clean MQTT ${reason}; reconnecting and resubscribing.`);
+    try {
+      this.mqttClient.reconnect();
+    } catch (error) {
+      this.mqttReconnectInProgress = false;
+      this.emit('debug', `Eufy Clean MQTT reconnect request failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private async sendCommand(command: CloudCommand, payload: Record<string, unknown> = {}): Promise<void> {
@@ -1039,16 +1147,24 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     }
     const dataPayloads = this.commandPayloads(command, payload);
     const qos = this.config.mqtt?.qos ?? 1;
-    for (const dataPayload of dataPayloads) {
-      const encoded = this.wrapCommand(deviceId, dataPayload);
-      this.emit(
-        'debug',
-        `Publishing Eufy Clean ${command} command using ${this.cloudApiMode} DPS keys: ${Object.keys(dataPayload).join(', ')}`,
-      );
-      for (const topic of topics) {
-        this.emit('debug', `Publishing Eufy Clean MQTT command to ${topic}`);
-        await this.publish(topic, encoded, qos);
+    if (this.mqttSubscribedTopicCount > 0) {
+      this.mqttPendingStatusSince = Date.now();
+    }
+    try {
+      for (const dataPayload of dataPayloads) {
+        const encoded = this.wrapCommand(deviceId, dataPayload);
+        this.emit(
+          'debug',
+          `Publishing Eufy Clean ${command} command using ${this.cloudApiMode} DPS keys: ${Object.keys(dataPayload).join(', ')}`,
+        );
+        for (const topic of topics) {
+          this.emit('debug', `Publishing Eufy Clean MQTT command to ${topic}`);
+          await this.publish(topic, encoded, qos);
+        }
       }
+    } catch (error) {
+      this.mqttPendingStatusSince = undefined;
+      throw error;
     }
   }
 
@@ -1057,6 +1173,8 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   }
 
   private handlePublish(topic: string, payload: Buffer): void {
+    this.mqttLastStatusAt = Date.now();
+    this.mqttPendingStatusSince = undefined;
     const status = this.codec.decodeStatus(this.unwrapPayload(payload));
     this.emit('debug', `Received Eufy Clean MQTT status from ${topic} with keys: ${Object.keys(status.dps).join(', ') || 'none'}`);
     this.setState(status.dps);
