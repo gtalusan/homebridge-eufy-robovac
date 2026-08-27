@@ -24,6 +24,12 @@
     "thread"
   ],
   "main": "dist/index.js",
+  "files": [
+    "config.schema.json",
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
   "engines": {
     "node": "^22.10.0 || ^24.0.0",
     "homebridge": ">=2.0.0-beta.93"
@@ -50,6 +56,8 @@
     "vitest": "^4.1.4"
   },
   "dependencies": {
+    "mqtt": "^5.15.1",
+    "node-rsa": "^1.1.1"
     "@george.talusan/eufy-robovac-js": "^0.0.14"
   }
 }

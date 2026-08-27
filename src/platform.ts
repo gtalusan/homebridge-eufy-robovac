@@ -2,12 +2,8 @@ import type { API, Characteristic, DynamicPlatformPlugin, Logging, MatterAccesso
 
 import { DefaultPlatformAccessory } from './defaultAccessory.js';
 import { EufyRobovacMatterAccessory } from './matter/EufyRobovacMatterAccessory.js';
+import { createRobovacClient, resolveTransport, type RobovacClient } from './robovac/index.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
-
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-
-const { RoboVac } = require('@george.talusan/eufy-robovac-js');
 
 export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service;
@@ -16,7 +12,7 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
   public readonly accessories: PlatformAccessory[] = [];
   public readonly matterAccessories: Map<string, MatterAccessory> = new Map();
 
-  public robovac: typeof RoboVac;
+  public robovac!: RobovacClient;
   public connected: boolean = false;
 
   private matterEnabled: boolean = false;
@@ -50,17 +46,28 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
       log.debug('Executed didFinishLaunching callback');
 
       try {
-        this.robovac = new RoboVac({ ip: config.ip, deviceId: config.deviceId, localKey: config.deviceKey });
+        this.robovac = createRobovacClient(config, this.log);
         this.robovac.on('tuya.connected', () => {
           this.connected = true;
           this.log.info('Connected');
         });
+        this.robovac.on('cloud.connected', () => {
+          this.connected = true;
+          this.log.info('Connected to Eufy Clean cloud');
+        });
         this.robovac.on('tuya.disconnected', () => {
-          this.log.info('Disconnected. Attempting reconnect...');
+          const wasConnected = this.connected;
           this.connected = false;
+          if (this.robovac.reconnectsAutomatically) {
+            if (wasConnected) {
+              this.log.info('Disconnected. Waiting for transport reconnect...');
+            }
+            return;
+          }
           if (this.reconnecting) {
             return;
           }
+          this.log.info('Disconnected. Attempting reconnect...');
           this.reconnecting = true;
           const id = setInterval(async () => {
             try {
@@ -72,10 +79,41 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
             }
           }, 2000);
         });
+        this.robovac.on('cloud.disconnected', () => {
+          const wasConnected = this.connected;
+          this.connected = false;
+          if (this.robovac.reconnectsAutomatically) {
+            if (wasConnected) {
+              this.log.info('Eufy Clean cloud disconnected. Waiting for MQTT reconnect...');
+            }
+            return;
+          }
+          if (this.reconnecting) {
+            return;
+          }
+          this.log.info('Eufy Clean cloud disconnected. Attempting reconnect...');
+          this.reconnecting = true;
+          const id = setInterval(async () => {
+            try {
+              await this.robovac.connect();
+              clearInterval(id);
+              this.reconnecting = false;
+            } catch (error: unknown) {
+              this.log.error(error as string);
+            }
+          }, 5000);
+        });
         this.robovac.on('error', (error: string) => {
           this.log.info(error);
         });
+        this.robovac.on('info', (message: string) => {
+          this.log.info(message);
+        });
+        this.robovac.on('debug', (message: string) => {
+          this.log.debug(message);
+        });
         await this.robovac.initialize();
+        this.config.deviceId = this.robovac.deviceId ?? this.config.deviceId;
       } catch (error: unknown) {
         this.log.error(error as string);
         return;
@@ -125,7 +163,7 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
           return `${this.config.name}`;
         },
         uuid: () => {
-          return this.api.hap.uuid.generate(`${this.config.name}-${this.config.ip}`);
+          return this.api.hap.uuid.generate(`${this.config.name}-${this.config.deviceId}`);
         },
         make: (accessory: PlatformAccessory) => {
           new DefaultPlatformAccessory(this, accessory);
@@ -152,12 +190,16 @@ export class EufyRobovacHomebridgePlatform implements DynamicPlatformPlugin {
   }
 
   parseConfig(): boolean {
-    ['name', 'ip', 'deviceId', 'deviceKey'].forEach((required: string) => {
-      if (!this.config[required]) {
-        this.log.error(`Please configure ${PLATFORM_NAME} correctly. Missing key '${required}'`);
+    const required = resolveTransport(this.config) === 'eufy-clean-cloud'
+      ? ['name', 'eufyEmail', 'eufyPassword']
+      : ['name', 'ip', 'deviceId', 'deviceKey'];
+
+    for (const key of required) {
+      if (!this.config[key]) {
+        this.log.error(`Please configure ${PLATFORM_NAME} correctly. Missing key '${key}'`);
         return false;
       }
-    });
+    }
     return true;
   }
 }

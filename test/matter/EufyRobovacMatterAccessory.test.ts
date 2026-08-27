@@ -118,9 +118,9 @@ describe('EufyRobovacMatterAccessory', () => {
       expect(accessory.clusters?.serviceArea?.selectedAreas).toEqual([0, 1]);
     });
 
-    it('should generate UUID from config ip + name', () => {
+    it('should generate UUID from config device id + name', () => {
       makeAccessory();
-      expect(api.matter.uuid.generate).toHaveBeenCalledWith(expect.stringContaining('10.0.1.69'));
+      expect(api.matter.uuid.generate).toHaveBeenCalledWith(expect.stringContaining('test-device-id'));
     });
 
     it('should set manufacturer to Eufy and model to RoboVac', () => {
@@ -547,7 +547,7 @@ describe('EufyRobovacMatterAccessory', () => {
       );
     });
 
-    it('should set operationalState=65 (Charging) when activity=Charging', () => {
+    it('should set operationalState=65 (Charging) and runMode=0 (Idle) when activity=Charging', () => {
       robovac = createMockRoboVac({ activity: 'Charging', docked: true });
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
@@ -557,6 +557,9 @@ describe('EufyRobovacMatterAccessory', () => {
 
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
         accessory.UUID, 'rvcOperationalState', { operationalState: 65 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcRunMode', { currentMode: 0 }, undefined,
       );
     });
 
@@ -628,7 +631,7 @@ describe('EufyRobovacMatterAccessory', () => {
       );
     });
 
-    it('should transition to Charging(65) on event { command: activity, value: Charging }', () => {
+    it('should transition to Charging(65) and runMode=0 (Idle) on event { command: activity, value: Charging }', () => {
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
       accessory.setMatterReady();
@@ -637,6 +640,9 @@ describe('EufyRobovacMatterAccessory', () => {
 
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
         accessory.UUID, 'rvcOperationalState', { operationalState: 65 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcRunMode', { currentMode: 0 }, undefined,
       );
     });
 
@@ -693,49 +699,16 @@ describe('EufyRobovacMatterAccessory', () => {
       );
     });
 
-    it('should set operationalState=1 (Running) and runMode=1 (Cleaning) on coverage event when not already running', () => {
-      config = createMockConfig();
-      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
-      accessory.setMatterReady();
-
-      robovac.emit('event', { command: 'coverage', value: 12 });
-
-      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
-        accessory.UUID, 'rvcOperationalState', { operationalState: 1 }, undefined,
-      );
-      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
-        accessory.UUID, 'rvcRunMode', { currentMode: 1 }, undefined,
-      );
-    });
-
-    it('should NOT update state on coverage event with value=0', () => {
+    it('should not infer Running from historical coverage', () => {
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
       accessory.setMatterReady();
       const callCountBefore = (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>).mock.calls.length;
 
-      robovac.emit('event', { command: 'coverage', value: 0 });
+      robovac.emit('event', { command: 'coverage', value: 24 });
 
       const newCalls = (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>).mock.calls.slice(callCountBefore);
       expect(newCalls).toHaveLength(0);
-    });
-
-    it('should NOT update state on coverage event when already running', () => {
-      config = createMockConfig();
-      robovac = createMockRoboVac({ batteryLevel: 100, connected: true, activity: 'Cleaning' });
-      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
-      accessory.setMatterReady();
-
-      // Force into running state first
-      robovac.emit('event', { command: 'playPause', value: true });
-      const callCountBefore = (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>).mock.calls.length;
-
-      robovac.emit('event', { command: 'coverage', value: 15 });
-
-      const opStateCalls = (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>).mock.calls
-        .slice(callCountBefore)
-        .filter(c => c[1] === 'rvcOperationalState');
-      expect(opStateCalls).toHaveLength(0);
     });
 
     it('should set operationalState=3 (Error) on event { command: error } with non-zero error', () => {

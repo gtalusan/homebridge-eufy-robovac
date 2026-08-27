@@ -27,11 +27,91 @@ Multiple child bridges will enable you to control multiple Eufy RoboVacs.  To co
 
 ### Configuration
 
-This plugin can be configured using homebridge-config-ui-x.  There are 4 required fields.
+This plugin can be configured using homebridge-config-ui-x.
 
-* Name - the name for your RoboVac
-* IP Address - the IP address of your RoboVac.  Configure your DHCP server to serve a static IP address to your RoboVac for the best experience.
-* Tuya Device ID and Tuya Device Key - these can be obtained by following https://github.com/gtalusan/eufy-device-id-js
+The plugin supports two connection modes:
+
+* Legacy Tuya 3.3 local control - the original local LAN control path for older RoboVac models.
+* Eufy Clean cloud/MQTT - the newer Eufy Clean cloud control path for models that no longer expose the older local Tuya 3.3 API.
+
+Existing configurations continue to use Legacy Tuya mode by default.  To opt in to the newer cloud/MQTT API, set `transport` to `eufy-clean-cloud`.
+
+Homebridge Config UI will show the relevant fields for the selected connection type and validate the required settings for that mode.
+
+#### Legacy Tuya 3.3 Local Control
+
+Use this mode for older RoboVacs that still support local Tuya 3.3 control.
+
+Required fields:
+
+* `name` - the name for your RoboVac
+* `transport` - `legacy-tuya`, or omit this field because it is the default
+* `ip` - the IP address of your RoboVac.  Configure your DHCP server to serve a static IP address to your RoboVac for the best experience.
+* `deviceId` - the Tuya/Eufy device ID
+* `deviceKey` - the Tuya/Eufy local key
+
+The Tuya device ID and local key can be obtained by following https://github.com/gtalusan/eufy-device-id-js.
+
+Example:
+
+```json
+{
+  "platform": "EufyRobovacHomebridgePlugin",
+  "name": "Eufy RoboVac",
+  "transport": "legacy-tuya",
+  "ip": "10.0.1.69",
+  "deviceId": "your-tuya-device-id",
+  "deviceKey": "your-tuya-local-key"
+}
+```
+
+#### Eufy Clean Cloud/MQTT
+
+Use this mode for newer Eufy Clean RoboVacs that communicate through Eufy's cloud and MQTT API.
+
+Required fields:
+
+* `name` - the name for your RoboVac
+* `transport` - `eufy-clean-cloud`
+* `eufyEmail` and `eufyPassword` - Eufy Clean account credentials
+
+Optional fields:
+
+* `deviceId` - Eufy Clean device ID. Leave this blank if your account has a single RoboVac; the plugin will discover it automatically.
+* `eufyAccessToken` - existing Eufy Clean access token
+* `country` - two-letter account country code, defaults to `US`
+* `eufyApiBaseUrl` - cloud API base URL override, defaults to `https://home-api.eufylife.com`
+* `deviceModel` - optional model code override when Eufy Clean discovery cannot identify the model
+* `showAdvancedMqtt` - reveals manual MQTT overrides. Most users should leave this disabled.
+
+The plugin discovers MQTT credentials from Eufy's AIOT API and derives MQTT topics automatically:
+
+* command topics: `cmd/eufy_home/{deviceModel}/{deviceId}/req` and `smart/mb/out/{deviceId}`
+* status topics: `cmd/eufy_home/{deviceModel}/{deviceId}/res` and `smart/mb/in/{deviceId}`
+
+Example:
+
+```json
+{
+  "platform": "EufyRobovacHomebridgePlugin",
+  "name": "Eufy RoboVac",
+  "transport": "eufy-clean-cloud",
+  "eufyEmail": "you@example.com",
+  "eufyPassword": "your-eufy-clean-password",
+  "country": "US"
+}
+```
+
+If the Eufy Clean account has multiple devices, startup will log the discovered device names and IDs.  Add the desired `deviceId` to select a specific RoboVac.
+
+The cloud/MQTT client accepts JSON status frames and protobuf-like status frames.  Status updates are normalized into the same internal RoboVac events used by the legacy Tuya path, so HomeKit and Matter accessories behave the same way in either mode.
+
+#### Shared Options
+
+`roomSwitches` works with both connection modes.  Each entry has:
+
+* `name` - the room name shown in HomeKit/Matter
+* `rooms` - a room number or comma-separated list of room numbers from the map in the Eufy Clean app
 
 ### HomeKit (HAP)
 
@@ -90,3 +170,5 @@ If you have `roomSwitches` configured, they are automatically mapped to Matter *
 3. Run this plugin as a child bridge (recommended)
 4. The plugin will log `Matter is available and enabled.` on startup
 
+### Acknowledgements
+With thanks to https://github.com/martijnpoppen/ for his Homey plugin efforts which the Eufy Cloud integration borrows from.

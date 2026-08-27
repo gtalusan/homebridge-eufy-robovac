@@ -186,8 +186,8 @@ describe('EufyRobovacHomebridgePlatform', () => {
     it('should skip re-registration for existing cached accessory (idempotent)', async () => {
       const platform = new EufyRobovacHomebridgePlatform(log, config, api);
       // Pre-cache the UUIDs that would be generated for our config
-      const vacuumUUID = (api.matter.uuid.generate as ReturnType<typeof vi.fn>)(`${config.name}-${config.ip}`);
-      const findUUID = (api.matter.uuid.generate as ReturnType<typeof vi.fn>)(`find-${config.name}-${config.ip}`);
+      const vacuumUUID = (api.matter.uuid.generate as ReturnType<typeof vi.fn>)(`${config.name}-${config.deviceId}`);
+      const findUUID = (api.matter.uuid.generate as ReturnType<typeof vi.fn>)(`find-${config.name}-${config.deviceId}`);
       platform.configureMatterAccessory({ UUID: vacuumUUID, displayName: 'Test' } as MatterAccessory);
       platform.configureMatterAccessory({ UUID: findUUID, displayName: 'Find Test' } as MatterAccessory);
       await api._triggerDidFinishLaunching();
@@ -228,6 +228,19 @@ describe('EufyRobovacHomebridgePlatform', () => {
       // Both HAP and Matter paths should complete
       expect(api.matter.registerPlatformAccessories).toHaveBeenCalled();
       expect(api.registerPlatformAccessories).toHaveBeenCalled();
+    });
+
+    it('should let an automatically reconnecting transport own its reconnect loop', async () => {
+      const platform = new EufyRobovacHomebridgePlatform(log, config, api);
+      await api._triggerDidFinishLaunching();
+      platform.robovac.reconnectsAutomatically = true;
+      platform.connected = true;
+
+      platform.robovac.emit('tuya.disconnected');
+
+      expect(platform.connected).toBe(false);
+      expect(platform.robovac.connect).not.toHaveBeenCalled();
+      expect(log.info).toHaveBeenCalledWith('Disconnected. Waiting for transport reconnect...');
     });
   });
 });
