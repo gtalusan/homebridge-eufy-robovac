@@ -47,6 +47,7 @@ export const EUFY_TO_MATTER_ERROR_MAP: Record<string | number, {
   'Stuck_5_min': { matterErrorStateId: 65, description: 'device trapped' },
   'Fan_stuck': { matterErrorStateId: 77, description: 'fan stuck' },
   'S_brush_stuck': { matterErrorStateId: 77, description: 'side brush stuck' },
+  'no_error': { matterErrorStateId: 0, description: 'no error' },
 };
 
 /**
