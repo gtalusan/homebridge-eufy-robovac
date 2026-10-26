@@ -229,5 +229,20 @@ describe('EufyRobovacHomebridgePlatform', () => {
       expect(api.matter.registerPlatformAccessories).toHaveBeenCalled();
       expect(api.registerPlatformAccessories).toHaveBeenCalled();
     });
+
+    it('should default to Tuya protocol 3.3 when tuyaVersion is omitted', async () => {
+      new EufyRobovacHomebridgePlatform(log, config, api);
+      await api._triggerDidFinishLaunching();
+      expect(mockState.lastRoboVacArgs).toMatchObject({ version: '3.3' });
+      expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Connecting with Tuya protocol 3.3'));
+    });
+
+    it('should pass configured tuyaVersion to RoboVac', async () => {
+      config = createMockConfig({ tuyaVersion: '3.5' });
+      new EufyRobovacHomebridgePlatform(log, config, api);
+      await api._triggerDidFinishLaunching();
+      expect(mockState.lastRoboVacArgs).toMatchObject({ version: '3.5' });
+      expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Connecting with Tuya protocol 3.5'));
+    });
   });
 });

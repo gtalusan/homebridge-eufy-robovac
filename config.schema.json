@@ -28,6 +28,13 @@
         "description": "Tuya/Eufy Device/Local Key (see: https://github.com/gtalusan/eufy-device-id-js)",
         "type": "string"
       },
+      "tuyaVersion": {
+        "title": "Tuya Protocol Version",
+        "description": "Tuya local protocol version. Use 3.3 for most RoboVacs (default). Use 3.5 for eufy Clean X8 Pro Hybrid (T2266) and X8 Pro SES (T2276).",
+        "type": "string",
+        "default": "3.3",
+        "enum": ["3.3", "3.4", "3.5"]
+      },
       "roomSwitches": {
         "description": "Rooms - configure according to the eufy clean app.  These are optional.  If no rooms, then the Eufy Robovac will be configured for Auto mode.",
         "type": "array",

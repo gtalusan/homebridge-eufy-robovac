@@ -32,6 +32,7 @@ This plugin can be configured using homebridge-config-ui-x.  There are 4 require
 * Name - the name for your RoboVac
 * IP Address - the IP address of your RoboVac.  Configure your DHCP server to serve a static IP address to your RoboVac for the best experience.
 * Tuya Device ID and Tuya Device Key - these can be obtained by following https://github.com/gtalusan/eufy-device-id-js
+* Tuya Protocol Version (optional) - defaults to `3.3`. Options: `3.3`, `3.4`, `3.5`. Set to `3.5` for **eufy Clean X8 Pro Hybrid (T2266)** and **X8 Pro SES (T2276)**.
 
 ### HomeKit (HAP)
 
