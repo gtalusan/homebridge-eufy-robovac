@@ -25,6 +25,7 @@ const mockState = vi.hoisted(() => {
   return {
     // The actual factory: called each time `new RoboVac(...)` is used in platform.ts
     shouldThrow: false,
+    lastRoboVacArgs: undefined as { version?: string } | undefined,
     makeRoboVac,
   };
 });
@@ -32,8 +33,8 @@ const mockState = vi.hoisted(() => {
 // Mock `module` so platform.ts's createRequire returns our mock RoboVac
 vi.mock('module', () => ({
   createRequire: () => (_id: string) => ({
-    RoboVac: function (...args: unknown[]) {
-      void args;
+    RoboVac: function (options: { version?: string }) {
+      mockState.lastRoboVacArgs = options;
       return mockState.makeRoboVac({ shouldThrow: mockState.shouldThrow });
     },
   }),
