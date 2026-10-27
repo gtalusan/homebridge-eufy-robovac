@@ -208,6 +208,16 @@ describe('EufyRobovacHomebridgePlatform', () => {
   // ─── Connection Management (3 tests) ──────────────────────────────
 
   describe('Connection Management', () => {
+    it('updates connection state when the legacy transport connects', async () => {
+      const platform = new EufyRobovacHomebridgePlatform(log, config, api);
+      await api._triggerDidFinishLaunching();
+
+      platform.robovac.emit('tuya.connected');
+
+      expect(platform.connected).toBe(true);
+      expect(log.info).toHaveBeenCalledWith('Connected');
+    });
+
     it('should log error and skip accessories on RoboVac initialization failure', async () => {
       mockState.shouldThrow = true;
       new EufyRobovacHomebridgePlatform(log, config, api);
